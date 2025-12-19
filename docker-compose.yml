@@ -1,0 +1,150 @@
+services:
+  # MongoDB
+  mongodb:
+    image: mongo:8.0
+    container_name: video-analitics-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: video_analitics
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Redis (for caching only)
+  redis:
+    image: redis:7.4-alpine
+    container_name: video-analitics-redis
+    restart: unless-stopped
+    ports:
+      - "6389:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # NATS with JetStream (message queue)
+  nats:
+    image: nats:2.10-alpine
+    container_name: video-analitics-nats
+    restart: unless-stopped
+    command: ["-c", "/config/nats.conf"]
+    ports:
+      - "4223:4222"   # client connections
+      - "8223:8222"   # monitoring
+    volumes:
+      - nats_data:/data
+      - ./nats.conf:/config/nats.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Meilisearch
+  meilisearch:
+    image: getmeili/meilisearch:v1.12
+    container_name: video-analitics-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: masterKey
+      MEILI_ENV: development
+    ports:
+      - "7701:7700"
+    volumes:
+      - meilisearch_data:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Indexer service
+  indexer:
+    build:
+      context: ./backend
+      dockerfile: indexer/Dockerfile
+    container_name: video-analitics-indexer
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      NATS_URL: nats://nats:4222
+      MONGO_URL: mongodb://mongodb:27017
+      MONGO_DB: video_analitics
+      MEILI_URL: http://meilisearch:7700
+      MEILI_KEY: masterKey
+      INDEXER_API_URL: http://indexer:8080
+      JWT_SECRET: "va-jwt-secret-2024-super-secure-key"
+      ADMIN_LOGIN: "admin"
+      ADMIN_PASSWORD: "VideoAdmin2024!"
+      INTERNAL_API_TOKEN: "va-internal-token-2024-secure"
+    ports:
+      - "8081:8080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+
+  # Parser service
+  parser:
+    build:
+      context: ./backend
+      dockerfile: parser/Dockerfile
+    container_name: video-analitics-parser
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    environment:
+      NATS_URL: nats://nats:4222
+      MONGO_URL: mongodb://mongodb:27017
+      MONGO_DB: video_analitics
+      MEILI_URL: http://meilisearch:7700
+      MEILI_KEY: masterKey
+      WORKER_COUNT: "5"
+      HTTP_PORT: "8082"
+      INTERNAL_API_TOKEN: "va-internal-token-2024-secure"
+    volumes:
+      - browser_profiles:/data/browser-profiles
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+    shm_size: 2gb
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: video-analitics-frontend
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    depends_on:
+      - indexer
+
+volumes:
+  mongodb_data:
+  redis_data:
+  meilisearch_data:
+  nats_data:
+  browser_profiles:

@@ -1,0 +1,3004 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "contact": {}
+    },
+    "paths": {
+        "/api/auth/login": {
+            "post": {
+                "description": "Authenticate user and get tokens",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Login",
+                "parameters": [
+                    {
+                        "description": "Credentials",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.LoginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.TokenResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/logout": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Invalidate refresh token",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Logout",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.SuccessResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/me": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get authenticated user profile",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Get current user",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.User"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/refresh": {
+            "post": {
+                "description": "Get new access token using refresh token",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Refresh access token",
+                "parameters": [
+                    {
+                        "description": "Refresh token",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.RefreshRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.TokenResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/content": {
+            "get": {
+                "description": "Get list of tracked content with violation stats",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "content"
+                ],
+                "summary": "List content",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search by title",
+                        "name": "title",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by Kinopoisk ID",
+                        "name": "kinopoisk_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by IMDB ID",
+                        "name": "imdb_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by MAL ID",
+                        "name": "mal_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by Shikimori ID",
+                        "name": "shikimori_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by MyDramaList ID",
+                        "name": "mydramalist_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by violations presence (true/false)",
+                        "name": "has_violations",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "violations_count",
+                            "created_at"
+                        ],
+                        "type": "string",
+                        "default": "violations_count",
+                        "description": "Sort by field",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "asc",
+                            "desc"
+                        ],
+                        "type": "string",
+                        "default": "desc",
+                        "description": "Sort order",
+                        "name": "sort_order",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ListContentResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Add content to track for violations",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "content"
+                ],
+                "summary": "Create content",
+                "parameters": [
+                    {
+                        "description": "Content data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.CreateContentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ContentWithStats"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/content/batch": {
+            "post": {
+                "description": "Add multiple content items to track for violations in a single batch request",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "content"
+                ],
+                "summary": "Create multiple content items",
+                "parameters": [
+                    {
+                        "description": "Content items data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.CreateContentBatchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.CreateContentBatchResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/content/check-violations": {
+            "post": {
+                "description": "Refresh violation stats for selected content items",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "content"
+                ],
+                "summary": "Check violations for content",
+                "parameters": [
+                    {
+                        "description": "Content IDs to check",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.CheckViolationsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.CheckViolationsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/content/delete": {
+            "post": {
+                "description": "Remove multiple content items from tracking",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "content"
+                ],
+                "summary": "Delete multiple content items",
+                "parameters": [
+                    {
+                        "description": "Content IDs to delete",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.DeleteContentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.DeleteContentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/content/{id}": {
+            "get": {
+                "description": "Get content details with violation stats",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "content"
+                ],
+                "summary": "Get content by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Content ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ContentWithStats"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Remove content from tracking",
+                "tags": [
+                    "content"
+                ],
+                "summary": "Delete content",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Content ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/content/{id}/violations": {
+            "get": {
+                "description": "Get list of pages where content was found",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "content"
+                ],
+                "summary": "Get violations for content",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Content ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ListViolationsResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/content/{id}/violations/export": {
+            "get": {
+                "description": "Export all violations for content to CSV file",
+                "produces": [
+                    "text/csv"
+                ],
+                "tags": [
+                    "content"
+                ],
+                "summary": "Export violations to CSV",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Content ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/pages": {
+            "get": {
+                "description": "Get list of indexed pages with filtering",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pages"
+                ],
+                "summary": "List indexed pages",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by site ID",
+                        "name": "site_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by Kinopoisk ID",
+                        "name": "kpid",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by IMDb ID",
+                        "name": "imdb_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search by title",
+                        "name": "title",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by year",
+                        "name": "year",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Filter by player presence",
+                        "name": "has_player",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Filter by violations presence (requires site_id)",
+                        "name": "has_violations",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "indexed_at",
+                            "year"
+                        ],
+                        "type": "string",
+                        "default": "indexed_at",
+                        "description": "Sort by field",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "asc",
+                            "desc"
+                        ],
+                        "type": "string",
+                        "default": "desc",
+                        "description": "Sort order",
+                        "name": "sort_order",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ListPagesResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/pages/stats": {
+            "get": {
+                "description": "Get statistics about indexed pages",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pages"
+                ],
+                "summary": "Get page statistics",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by site ID",
+                        "name": "site_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.PageStats"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/scan-tasks": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get list of recent scan tasks",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "List recent scan tasks",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by site ID",
+                        "name": "site_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by domain (partial match)",
+                        "name": "domain",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status (pending, processing, completed, failed, cancelled)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ListTasksResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/scan-tasks/cancel": {
+            "post": {
+                "description": "Cancel pending or processing scan tasks",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Cancel scan tasks",
+                "parameters": [
+                    {
+                        "description": "Task IDs to cancel",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.CancelTasksRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.CancelTasksResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/scan-tasks/{id}": {
+            "get": {
+                "description": "Get scan task details and status",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Get scan task by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.ScanTask"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sites": {
+            "get": {
+                "description": "Get list of monitored sites with pagination",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "List all sites",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by status (active, down, dead)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by last scan date (today, week, month)",
+                        "name": "scanned_since",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by violations (true, false)",
+                        "name": "has_violations",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ListSitesResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Add a new site to monitor",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "Create a new site",
+                "parameters": [
+                    {
+                        "description": "Site data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.CreateSiteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Site already exists, user linked",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.Site"
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.Site"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Site already in user's list",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sites/batch": {
+            "post": {
+                "description": "Add multiple sites to monitor in a single batch request",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "Create multiple sites",
+                "parameters": [
+                    {
+                        "description": "Sites data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.CreateSitesBatchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.CreateSitesBatchResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sites/delete": {
+            "post": {
+                "description": "Delete multiple sites by ID along with all related pages and tasks",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "Delete multiple sites",
+                "parameters": [
+                    {
+                        "description": "Site IDs to delete",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.DeleteSitesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.DeleteSitesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sites/scan": {
+            "post": {
+                "description": "Queues sites for crawling and indexing",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scan"
+                ],
+                "summary": "Start scanning sites",
+                "parameters": [
+                    {
+                        "description": "Site IDs to scan",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ScanRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ScanResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sites/{id}": {
+            "get": {
+                "description": "Get site details",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "Get site by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Site ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.SiteWithStats"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete a site by ID along with all related pages and tasks",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "Delete site",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Site ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sites/{id}/all-urls": {
+            "get": {
+                "description": "Returns all URL strings for a site (for crawler deduplication)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "Get all discovered URLs for a site",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Site ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.AllURLsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sites/{id}/analyze": {
+            "post": {
+                "description": "Re-run detection for a frozen or pending site",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "Re-analyze a site",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Site ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sites/{id}/pending-urls": {
+            "get": {
+                "description": "Get URLs that need to be parsed (status=pending, respects retry logic)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "Get pending URLs for crawling",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Site ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Max URLs to return",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.PendingURLsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sites/{id}/scan-pages": {
+            "post": {
+                "description": "Start page crawl for pending URLs without re-scanning sitemap",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "Scan pages only",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Site ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ScanStageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sites/{id}/scan-sitemap": {
+            "post": {
+                "description": "Start sitemap crawl to collect URLs without parsing pages",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "Scan sitemap only",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Site ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ScanStageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sites/{id}/sitemap-urls": {
+            "get": {
+                "description": "Get paginated list of URLs from sitemap",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "List sitemap URLs for a site",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Site ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status (pending, indexed, error, skipped)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Items per page",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.SitemapURLsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sites/{id}/sitemap-urls/stats": {
+            "get": {
+                "description": "Get count of URLs by status",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "Get sitemap URLs statistics",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Site ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.SitemapURLStats"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sites/{id}/unfreeze": {
+            "post": {
+                "description": "Unfreeze a site and optionally change scanner type",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "Unfreeze a frozen site",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Site ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Scanner type",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.UnfreezeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.Site"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sites/{id}/violations": {
+            "get": {
+                "description": "Get list of content violations found on this site",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sites"
+                ],
+                "summary": "Get violations for site",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Site ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ListSiteViolationsResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/users": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get list of all users with pagination",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "List users (admin only)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by role (admin, user)",
+                        "name": "role",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Filter by active status",
+                        "name": "is_active",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Limit",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.UsersListResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create a new user",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Create user (admin only)",
+                "parameters": [
+                    {
+                        "description": "User data",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.CreateUserRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.User"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/users/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Update user details",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Update user (admin only)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "User data",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.UpdateUserRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.User"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deactivate a user (soft delete)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Soft delete user (admin only)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.SuccessResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/indexer_internal_handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "github_com_video-analitics_backend_pkg_status.CrawlStrategy": {
+            "description": "Crawling strategy",
+            "type": "string",
+            "enum": [
+                "sitemap"
+            ],
+            "x-enum-varnames": [
+                "CrawlStrategySitemap"
+            ]
+        },
+        "github_com_video-analitics_backend_pkg_status.ScannerType": {
+            "description": "Scanner type",
+            "type": "string",
+            "enum": [
+                "http",
+                "spa"
+            ],
+            "x-enum-comments": {
+                "ScannerHTTP": "standard HTTP fetcher",
+                "ScannerSPA": "chromedp for SPA/protected sites"
+            },
+            "x-enum-descriptions": [
+                "standard HTTP fetcher",
+                "chromedp for SPA/protected sites"
+            ],
+            "x-enum-varnames": [
+                "ScannerHTTP",
+                "ScannerSPA"
+            ]
+        },
+        "github_com_video-analitics_backend_pkg_status.Site": {
+            "description": "Site status",
+            "type": "string",
+            "enum": [
+                "pending",
+                "active",
+                "down",
+                "dead",
+                "frozen",
+                "moved"
+            ],
+            "x-enum-comments": {
+                "SiteActive": "ready for scanning",
+                "SiteDead": "permanently unavailable (2+ failures)",
+                "SiteDown": "temporarily unavailable (1 failure)",
+                "SiteFrozen": "blocked (403/captcha), requires SPA scanner",
+                "SiteMoved": "domain redirected to another domain",
+                "SitePending": "awaiting detection"
+            },
+            "x-enum-descriptions": [
+                "awaiting detection",
+                "ready for scanning",
+                "temporarily unavailable (1 failure)",
+                "permanently unavailable (2+ failures)",
+                "blocked (403/captcha), requires SPA scanner",
+                "domain redirected to another domain"
+            ],
+            "x-enum-varnames": [
+                "SitePending",
+                "SiteActive",
+                "SiteDown",
+                "SiteDead",
+                "SiteFrozen",
+                "SiteMoved"
+            ]
+        },
+        "github_com_video-analitics_backend_pkg_status.SitemapStatus": {
+            "description": "Sitemap detection status",
+            "type": "string",
+            "enum": [
+                "none",
+                "valid",
+                "invalid",
+                "empty"
+            ],
+            "x-enum-comments": {
+                "SitemapEmpty": "sitemap works but has no URLs",
+                "SitemapInvalid": "sitemap declared but unavailable (404, parse error)",
+                "SitemapNone": "sitemap not found",
+                "SitemapValid": "sitemap works and contains URLs"
+            },
+            "x-enum-descriptions": [
+                "sitemap not found",
+                "sitemap works and contains URLs",
+                "sitemap declared but unavailable (404, parse error)",
+                "sitemap works but has no URLs"
+            ],
+            "x-enum-varnames": [
+                "SitemapNone",
+                "SitemapValid",
+                "SitemapInvalid",
+                "SitemapEmpty"
+            ]
+        },
+        "github_com_video-analitics_backend_pkg_status.Stage": {
+            "description": "Task stage",
+            "type": "string",
+            "enum": [
+                "sitemap",
+                "page",
+                "done"
+            ],
+            "x-enum-comments": {
+                "StageDone": "all stages completed",
+                "StagePage": "parsing pages",
+                "StageSitemap": "collecting URLs from sitemap"
+            },
+            "x-enum-descriptions": [
+                "collecting URLs from sitemap",
+                "parsing pages",
+                "all stages completed"
+            ],
+            "x-enum-varnames": [
+                "StageSitemap",
+                "StagePage",
+                "StageDone"
+            ]
+        },
+        "github_com_video-analitics_backend_pkg_status.Task": {
+            "description": "Task status",
+            "type": "string",
+            "enum": [
+                "pending",
+                "processing",
+                "completed",
+                "failed",
+                "cancelled"
+            ],
+            "x-enum-comments": {
+                "TaskCancelled": "cancelled by user",
+                "TaskCompleted": "finished successfully",
+                "TaskFailed": "finished with error",
+                "TaskPending": "waiting in queue",
+                "TaskProcessing": "being processed by worker"
+            },
+            "x-enum-descriptions": [
+                "waiting in queue",
+                "being processed by worker",
+                "finished successfully",
+                "finished with error",
+                "cancelled by user"
+            ],
+            "x-enum-varnames": [
+                "TaskPending",
+                "TaskProcessing",
+                "TaskCompleted",
+                "TaskFailed",
+                "TaskCancelled"
+            ]
+        },
+        "github_com_video-analitics_backend_pkg_status.URL": {
+            "description": "URL indexing status",
+            "type": "string",
+            "enum": [
+                "pending",
+                "indexed",
+                "error",
+                "skipped"
+            ],
+            "x-enum-comments": {
+                "URLError": "failed after max retries",
+                "URLIndexed": "successfully indexed",
+                "URLPending": "waiting to be indexed",
+                "URLSkipped": "skipped (e.g., XML sitemap reference)"
+            },
+            "x-enum-descriptions": [
+                "waiting to be indexed",
+                "successfully indexed",
+                "failed after max retries",
+                "skipped (e.g., XML sitemap reference)"
+            ],
+            "x-enum-varnames": [
+                "URLPending",
+                "URLIndexed",
+                "URLError",
+                "URLSkipped"
+            ]
+        },
+        "github_com_video-analitics_indexer_internal_repo.PageStats": {
+            "type": "object",
+            "properties": {
+                "total": {
+                    "type": "integer"
+                },
+                "with_imdb_id": {
+                    "type": "integer"
+                },
+                "with_kpid": {
+                    "type": "integer"
+                },
+                "with_player": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_video-analitics_indexer_internal_repo.ScanTask": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "domain": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "page_result": {
+                    "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.StageResult"
+                },
+                "site_id": {
+                    "type": "string"
+                },
+                "sitemap_result": {
+                    "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.StageResult"
+                },
+                "stage": {
+                    "$ref": "#/definitions/github_com_video-analitics_backend_pkg_status.Stage"
+                },
+                "status": {
+                    "$ref": "#/definitions/github_com_video-analitics_backend_pkg_status.Task"
+                }
+            }
+        },
+        "github_com_video-analitics_indexer_internal_repo.Site": {
+            "type": "object",
+            "properties": {
+                "captcha_type": {
+                    "type": "string"
+                },
+                "cms": {
+                    "type": "string"
+                },
+                "cookies_updated_at": {
+                    "type": "string"
+                },
+                "crawl_strategy": {
+                    "$ref": "#/definitions/github_com_video-analitics_backend_pkg_status.CrawlStrategy"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "domain": {
+                    "type": "string"
+                },
+                "failure_count": {
+                    "type": "integer"
+                },
+                "freeze_reason": {
+                    "type": "string"
+                },
+                "has_sitemap": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_scan_at": {
+                    "type": "string"
+                },
+                "moved_at": {
+                    "type": "string"
+                },
+                "moved_to_domain": {
+                    "type": "string"
+                },
+                "next_scan_at": {
+                    "type": "string"
+                },
+                "original_domain": {
+                    "type": "string"
+                },
+                "owner_id": {
+                    "type": "string"
+                },
+                "scan_interval_h": {
+                    "type": "integer"
+                },
+                "scanner_type": {
+                    "$ref": "#/definitions/github_com_video-analitics_backend_pkg_status.ScannerType"
+                },
+                "sitemap_status": {
+                    "$ref": "#/definitions/github_com_video-analitics_backend_pkg_status.SitemapStatus"
+                },
+                "sitemap_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "sitemaps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.SitemapInfo"
+                    }
+                },
+                "status": {
+                    "$ref": "#/definitions/github_com_video-analitics_backend_pkg_status.Site"
+                },
+                "total_urls_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_video-analitics_indexer_internal_repo.SitemapInfo": {
+            "type": "object",
+            "properties": {
+                "error_count": {
+                    "type": "integer"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "last_parsed_at": {
+                    "type": "string"
+                },
+                "last_urls_found": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "urls_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_video-analitics_indexer_internal_repo.SitemapURL": {
+            "type": "object",
+            "properties": {
+                "changefreq": {
+                    "type": "string"
+                },
+                "depth": {
+                    "description": "Глубина: 0 = из sitemap/главная, 1-3 = найдены при парсинге страниц",
+                    "type": "integer"
+                },
+                "discovered_at": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "indexed_at": {
+                    "type": "string"
+                },
+                "is_xml": {
+                    "type": "boolean"
+                },
+                "last_attempt_at": {
+                    "type": "string"
+                },
+                "lastmod": {
+                    "type": "string"
+                },
+                "locked_until": {
+                    "type": "string"
+                },
+                "priority": {
+                    "type": "number"
+                },
+                "retry_count": {
+                    "type": "integer"
+                },
+                "site_id": {
+                    "type": "string"
+                },
+                "sitemap_source": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/github_com_video-analitics_backend_pkg_status.URL"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_video-analitics_indexer_internal_repo.SitemapURLStats": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "integer"
+                },
+                "indexed": {
+                    "type": "integer"
+                },
+                "pending": {
+                    "type": "integer"
+                },
+                "skipped": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_video-analitics_indexer_internal_repo.StageResult": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/github_com_video-analitics_backend_pkg_status.Task"
+                },
+                "success": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_video-analitics_indexer_internal_repo.User": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "login": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                }
+            }
+        },
+        "indexer_internal_handler.ActiveTaskProgress": {
+            "type": "object",
+            "properties": {
+                "failed": {
+                    "type": "integer"
+                },
+                "success": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.AllURLsResponse": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "indexer_internal_handler.CancelTasksRequest": {
+            "type": "object",
+            "properties": {
+                "task_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "indexer_internal_handler.CancelTasksResponse": {
+            "type": "object",
+            "properties": {
+                "cancelled_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.CheckViolationsRequest": {
+            "type": "object",
+            "properties": {
+                "content_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "indexer_internal_handler.CheckViolationsResponse": {
+            "type": "object",
+            "properties": {
+                "checked_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.ContentWithStats": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "imdb_id": {
+                    "type": "string"
+                },
+                "kinopoisk_id": {
+                    "type": "string"
+                },
+                "mal_id": {
+                    "type": "string"
+                },
+                "mydramalist_id": {
+                    "type": "string"
+                },
+                "original_title": {
+                    "type": "string"
+                },
+                "owner_id": {
+                    "type": "string"
+                },
+                "shikimori_id": {
+                    "type": "string"
+                },
+                "sites_count": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "violations_count": {
+                    "type": "integer"
+                },
+                "year": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.CreateContentBatchRequest": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/indexer_internal_handler.CreateContentRequest"
+                    }
+                }
+            }
+        },
+        "indexer_internal_handler.CreateContentBatchResponse": {
+            "type": "object",
+            "properties": {
+                "content_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "created": {
+                    "type": "integer"
+                },
+                "failed": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.CreateContentRequest": {
+            "type": "object",
+            "properties": {
+                "imdb_id": {
+                    "type": "string"
+                },
+                "kinopoisk_id": {
+                    "type": "string"
+                },
+                "mal_id": {
+                    "type": "string"
+                },
+                "mydramalist_id": {
+                    "type": "string"
+                },
+                "original_title": {
+                    "type": "string"
+                },
+                "shikimori_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "year": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.CreateSiteRequest": {
+            "type": "object",
+            "properties": {
+                "cms": {
+                    "type": "string"
+                },
+                "domain": {
+                    "type": "string"
+                },
+                "has_sitemap": {
+                    "type": "boolean"
+                },
+                "scan_interval_h": {
+                    "type": "integer"
+                },
+                "sitemap_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "indexer_internal_handler.CreateSitesBatchRequest": {
+            "type": "object",
+            "properties": {
+                "sites": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/indexer_internal_handler.CreateSiteRequest"
+                    }
+                }
+            }
+        },
+        "indexer_internal_handler.CreateSitesBatchResponse": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "integer"
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "site_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "indexer_internal_handler.CreateUserRequest": {
+            "type": "object",
+            "properties": {
+                "login": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                }
+            }
+        },
+        "indexer_internal_handler.DeleteContentRequest": {
+            "type": "object",
+            "properties": {
+                "content_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "indexer_internal_handler.DeleteContentResponse": {
+            "type": "object",
+            "properties": {
+                "deleted_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.DeleteSitesRequest": {
+            "type": "object",
+            "properties": {
+                "site_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "indexer_internal_handler.DeleteSitesResponse": {
+            "type": "object",
+            "properties": {
+                "deleted_count": {
+                    "type": "integer"
+                },
+                "pages_deleted": {
+                    "type": "integer"
+                },
+                "tasks_deleted": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "indexer_internal_handler.LastScanResult": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.ListContentResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/indexer_internal_handler.ContentWithStats"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.ListPagesResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/indexer_internal_handler.PageResponse"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.ListSiteViolationsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/indexer_internal_handler.SiteViolationResponse"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.ListSitesResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/indexer_internal_handler.SiteWithStats"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.ListTasksResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.ScanTask"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.ListViolationsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/indexer_internal_handler.ViolationResponse"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.LoginRequest": {
+            "type": "object",
+            "properties": {
+                "login": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                }
+            }
+        },
+        "indexer_internal_handler.PageExternalIDs": {
+            "type": "object",
+            "properties": {
+                "imdb_id": {
+                    "type": "string"
+                },
+                "kinopoisk_id": {
+                    "type": "string"
+                },
+                "mal_id": {
+                    "type": "string"
+                },
+                "mydramalist_id": {
+                    "type": "string"
+                },
+                "shikimori_id": {
+                    "type": "string"
+                },
+                "tmdb_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "indexer_internal_handler.PageResponse": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "external_ids": {
+                    "$ref": "#/definitions/indexer_internal_handler.PageExternalIDs"
+                },
+                "http_status": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "indexed_at": {
+                    "type": "string"
+                },
+                "player_url": {
+                    "type": "string"
+                },
+                "site_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "year": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.PendingURLWithDepth": {
+            "type": "object",
+            "properties": {
+                "depth": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "indexer_internal_handler.PendingURLsResponse": {
+            "type": "object",
+            "properties": {
+                "all_indexed": {
+                    "type": "boolean"
+                },
+                "in_retry": {
+                    "type": "boolean"
+                },
+                "indexed_urls": {
+                    "type": "integer"
+                },
+                "total_urls": {
+                    "type": "integer"
+                },
+                "urls": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/indexer_internal_handler.PendingURLWithDepth"
+                    }
+                }
+            }
+        },
+        "indexer_internal_handler.RefreshRequest": {
+            "type": "object",
+            "properties": {
+                "refresh_token": {
+                    "type": "string"
+                }
+            }
+        },
+        "indexer_internal_handler.ScanRequest": {
+            "type": "object",
+            "properties": {
+                "site_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "indexer_internal_handler.ScanResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "site_count": {
+                    "type": "integer"
+                },
+                "task_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "indexer_internal_handler.ScanStageResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "indexer_internal_handler.SiteViolationResponse": {
+            "type": "object",
+            "properties": {
+                "content_id": {
+                    "type": "string"
+                },
+                "found_at": {
+                    "type": "string"
+                },
+                "match_type": {
+                    "type": "string"
+                },
+                "page_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "indexer_internal_handler.SiteWithStats": {
+            "type": "object",
+            "properties": {
+                "active_stage": {
+                    "type": "string"
+                },
+                "active_task_progress": {
+                    "$ref": "#/definitions/indexer_internal_handler.ActiveTaskProgress"
+                },
+                "captcha_type": {
+                    "type": "string"
+                },
+                "cms": {
+                    "type": "string"
+                },
+                "cookies_updated_at": {
+                    "type": "string"
+                },
+                "crawl_strategy": {
+                    "$ref": "#/definitions/github_com_video-analitics_backend_pkg_status.CrawlStrategy"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "domain": {
+                    "type": "string"
+                },
+                "failure_count": {
+                    "type": "integer"
+                },
+                "freeze_reason": {
+                    "type": "string"
+                },
+                "has_sitemap": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_scan": {
+                    "$ref": "#/definitions/indexer_internal_handler.LastScanResult"
+                },
+                "last_scan_at": {
+                    "type": "string"
+                },
+                "moved_at": {
+                    "type": "string"
+                },
+                "moved_to_domain": {
+                    "type": "string"
+                },
+                "next_scan_at": {
+                    "type": "string"
+                },
+                "original_domain": {
+                    "type": "string"
+                },
+                "owner_id": {
+                    "type": "string"
+                },
+                "pending_urls_count": {
+                    "type": "integer"
+                },
+                "scan_interval_h": {
+                    "type": "integer"
+                },
+                "scanner_type": {
+                    "$ref": "#/definitions/github_com_video-analitics_backend_pkg_status.ScannerType"
+                },
+                "sitemap_status": {
+                    "$ref": "#/definitions/github_com_video-analitics_backend_pkg_status.SitemapStatus"
+                },
+                "sitemap_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "sitemaps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.SitemapInfo"
+                    }
+                },
+                "status": {
+                    "$ref": "#/definitions/github_com_video-analitics_backend_pkg_status.Site"
+                },
+                "total_urls_count": {
+                    "type": "integer"
+                },
+                "violations_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.SitemapURLsResponse": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "urls": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.SitemapURL"
+                    }
+                }
+            }
+        },
+        "indexer_internal_handler.SuccessResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "indexer_internal_handler.TokenResponse": {
+            "type": "object",
+            "properties": {
+                "access_token": {
+                    "type": "string"
+                },
+                "expires_in": {
+                    "type": "integer"
+                },
+                "refresh_token": {
+                    "type": "string"
+                }
+            }
+        },
+        "indexer_internal_handler.UnfreezeRequest": {
+            "type": "object",
+            "properties": {
+                "scanner_type": {
+                    "description": "\"http\" или \"spa\"",
+                    "type": "string"
+                }
+            }
+        },
+        "indexer_internal_handler.UpdateUserRequest": {
+            "type": "object",
+            "properties": {
+                "is_active": {
+                    "type": "boolean"
+                },
+                "login": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                }
+            }
+        },
+        "indexer_internal_handler.UsersListResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_video-analitics_indexer_internal_repo.User"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "indexer_internal_handler.ViolationResponse": {
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string"
+                },
+                "found_at": {
+                    "type": "string"
+                },
+                "match_type": {
+                    "type": "string"
+                },
+                "page_id": {
+                    "type": "string"
+                },
+                "site_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}

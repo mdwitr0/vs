@@ -1,0 +1,22 @@
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Env files
+.env
+**/.env
+
+# Build artifacts
+**/bin/
+**/dist/
+
+# Test files
+**/*_test.go
+
+# Documentation
+docs/
+*.md

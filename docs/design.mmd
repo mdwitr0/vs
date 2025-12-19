@@ -1,0 +1,80 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#e0e7ff', 'lineColor': '#6366f1'}}}%%
+
+flowchart LR
+    %% ===== ACTORS =====
+    USER(("👤 Manager"))
+    CRON(("⏰ Scheduler"))
+
+    %% ===== FRONTEND =====
+    FE["🖥️ <b>Frontend</b><br/>React · :3000"]
+
+    %% ===== INDEXER SERVICE =====
+    subgraph Indexer["Indexer Service · :8080"]
+        direction TB
+
+        API["<b>REST API</b><br/>Fiber"]
+
+        subgraph Core["Business Logic"]
+            direction LR
+            DETECT["<b>Detector</b><br/>Определяет CMS,<br/>SSR/CSR, Captcha"]
+            SCAN["<b>Scanner</b><br/>Sitemap parser,<br/>Crawler, Extractor"]
+        end
+
+        BROWSER["<b>Browser</b><br/>chromedp<br/>для SPA сайтов"]
+    end
+
+    %% ===== EXTERNAL =====
+    SITES[("🏴‍☠️ <b>Pirate Sites</b>")]
+
+    %% ===== DATABASE =====
+    subgraph DB["MongoDB"]
+        direction TB
+        C_SITES[("sites")]
+        C_PAGES[("pages")]
+        C_TASKS[("scan_tasks")]
+    end
+
+    %% ===== FLOW 1: Manual Scan =====
+    USER -->|"1. Открывает UI"| FE
+    FE -->|"2. POST /sites/{id}/scan"| API
+    API -->|"3. Создаёт task"| C_TASKS
+    API -->|"4. Возвращает taskId"| FE
+
+    %% ===== FLOW 2: Scheduled Scan =====
+    CRON -->|"1. Триггер по расписанию"| API
+
+    %% ===== FLOW 3: Scan Process =====
+    API -->|"5. Запускает"| DETECT
+    DETECT -->|"6. GET /"| SITES
+    DETECT -->|"7. Сохраняет tech_info"| C_SITES
+
+    DETECT -->|"8. Если SPA"| BROWSER
+    BROWSER -->|"9. Рендерит JS"| SITES
+
+    API -->|"10. Запускает"| SCAN
+    SCAN -->|"11. GET sitemap.xml"| SITES
+    SCAN -->|"12. GET /movie/*"| SITES
+    SCAN -->|"13. Если SPA"| BROWSER
+
+    SCAN -->|"14. Upsert pages"| C_PAGES
+    SCAN -->|"15. Update stats"| C_SITES
+    SCAN -->|"16. Complete task"| C_TASKS
+
+    %% ===== FLOW 4: Polling =====
+    FE -.->|"Poll: GET /tasks/{id}"| API
+    API -.->|"Progress/Result"| FE
+
+    %% ===== STYLING =====
+    classDef actor fill:#7c3aed,stroke:#5b21b6,color:#fff
+    classDef frontend fill:#dbeafe,stroke:#2563eb,color:#1e40af
+    classDef service fill:#dcfce7,stroke:#16a34a,color:#166534
+    classDef external fill:#fee2e2,stroke:#dc2626,color:#991b1b
+    classDef database fill:#fef9c3,stroke:#ca8a04,color:#854d0e
+    classDef browser fill:#f3e8ff,stroke:#9333ea,color:#7e22ce
+
+    class USER,CRON actor
+    class FE frontend
+    class API,DETECT,SCAN,Core service
+    class BROWSER browser
+    class SITES external
+    class DB,C_SITES,C_PAGES,C_TASKS database
