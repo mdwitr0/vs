@@ -124,6 +124,49 @@ function buildQueryString(params: Record<string, string | number | boolean | und
   return queryString ? `?${queryString}` : ''
 }
 
+export async function downloadFile(url: string, defaultFilename: string = 'download'): Promise<void> {
+  const token = localStorage.getItem('access_token')
+  const headers: HeadersInit = {}
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const response = await fetch(url, { headers })
+
+  if (response.status === 401) {
+    const refreshed = await tryRefresh()
+    if (refreshed) {
+      return downloadFile(url, defaultFilename)
+    }
+    window.location.href = '/login'
+    throw new ApiError(401, 'Unauthorized')
+  }
+
+  if (!response.ok) {
+    throw new ApiError(response.status, 'Download failed')
+  }
+
+  const blob = await response.blob()
+
+  let filename = defaultFilename
+  const contentDisposition = response.headers.get('content-disposition')
+  if (contentDisposition) {
+    const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+    if (match && match[1]) {
+      filename = match[1].replace(/['"]/g, '')
+    }
+  }
+
+  const blobUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = blobUrl
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(blobUrl)
+}
+
 export const authApi = {
   login: (login: string, password: string) =>
     request<TokenResponse>('/auth/login', {
@@ -236,6 +279,18 @@ export const pagesApi = {
     const query = buildQueryString({ site_id: siteId })
     return request<PageStats>(`/pages/stats${query}`)
   },
+
+  exportUrl: (params: PagesQueryParams = {}): string => {
+    const query = buildQueryString({
+      site_id: params.site_id,
+      year: params.year,
+      has_player: params.has_player,
+      has_violations: params.has_violations,
+      sort_by: params.sort_by,
+      sort_order: params.sort_order,
+    })
+    return `${API_BASE}/pages/export${query}`
+  },
 }
 
 export const tasksApi = {
@@ -321,6 +376,37 @@ export const contentApi = {
 
   exportViolationsUrl: (id: string): string => {
     return `${API_BASE}/content/${id}/violations/export`
+  },
+
+  exportViolationsTextUrl: (id: string): string => {
+    return `${API_BASE}/content/${id}/violations/export-text`
+  },
+
+  exportUrl: (params?: ContentQueryParams): string => {
+    const query = buildQueryString({
+      title: params?.title,
+      kinopoisk_id: params?.kinopoisk_id,
+      imdb_id: params?.imdb_id,
+      mal_id: params?.mal_id,
+      shikimori_id: params?.shikimori_id,
+      mydramalist_id: params?.mydramalist_id,
+      has_violations: params?.has_violations,
+      sort_by: params?.sort_by,
+      sort_order: params?.sort_order,
+    })
+    return `${API_BASE}/content/export${query}`
+  },
+
+  exportAllViolationsTextUrl: (params?: ContentQueryParams): string => {
+    const query = buildQueryString({
+      title: params?.title,
+      kinopoisk_id: params?.kinopoisk_id,
+      imdb_id: params?.imdb_id,
+      mal_id: params?.mal_id,
+      shikimori_id: params?.shikimori_id,
+      mydramalist_id: params?.mydramalist_id,
+    })
+    return `${API_BASE}/content/violations/export-text${query}`
   },
 
   checkViolations: (contentIds: string[]): Promise<{ checked_count: number }> => {

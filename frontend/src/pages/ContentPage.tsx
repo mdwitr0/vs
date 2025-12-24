@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { contentApi } from '@/lib/api'
+import { contentApi, downloadFile } from '@/lib/api'
 import type { ContentWithStats, CreateContentRequest, ContentSortBy, ContentHasViolations } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,7 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Pagination } from '@/components/ui/pagination'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { PageHeader } from '@/components/PageHeader'
-import { Download, Upload, Plus, Trash2, Search } from 'lucide-react'
+import { Download, Upload, Plus, Trash2, Search, FileText } from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -51,33 +51,6 @@ const VIOLATIONS_OPTIONS: { value: string; label: string }[] = [
 function formatDate(dateString: string | undefined): string {
   if (!dateString) return '-'
   return new Date(dateString).toLocaleString('ru-RU')
-}
-
-function downloadCsv(data: ContentWithStats[], filename: string) {
-  const header = 'Название,Оригинальное название,Год выхода,КиноПоиск ID,IMDb ID,MDL ID,MAL ID,Shikimori ID,Нарушений,Сайтов,Добавлен'
-  const rows = data.map((c) =>
-    [
-      `"${c.title.replace(/"/g, '""')}"`,
-      `"${(c.original_title ?? '').replace(/"/g, '""')}"`,
-      c.year ?? '',
-      c.kinopoisk_id ?? '',
-      c.imdb_id ?? '',
-      c.mydramalist_id ?? '',
-      c.mal_id ?? '',
-      c.shikimori_id ?? '',
-      c.violations_count,
-      c.sites_count,
-      c.created_at,
-    ].join(',')
-  )
-  const csv = [header, ...rows].join('\n')
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.click()
-  URL.revokeObjectURL(url)
 }
 
 export function ContentPage() {
@@ -379,10 +352,34 @@ export function ContentPage() {
       icon: <Trash2 className="h-4 w-4" />,
     },
     {
-      label: 'Выгрузить в CSV',
-      onClick: () => downloadCsv(items, 'content.csv'),
-      disabled: items.length === 0,
+      label: 'Выгрузить контент (CSV)',
+      onClick: () => downloadFile(contentApi.exportUrl({
+        title: debouncedTitle || undefined,
+        kinopoisk_id: debouncedKinopoiskId || undefined,
+        imdb_id: debouncedImdb || undefined,
+        mal_id: debouncedMalId || undefined,
+        shikimori_id: debouncedShikimoriId || undefined,
+        mydramalist_id: debouncedMydramalistId || undefined,
+        has_violations: hasViolations === 'all' ? undefined : hasViolations as ContentHasViolations,
+        sort_by: sortBy,
+        sort_order: 'desc',
+      }), 'content.csv'),
+      disabled: total === 0,
       icon: <Download className="h-4 w-4" />,
+      iconOnly: true,
+    },
+    {
+      label: 'Выгрузить отчёт',
+      onClick: () => downloadFile(contentApi.exportAllViolationsTextUrl({
+        title: debouncedTitle || undefined,
+        kinopoisk_id: debouncedKinopoiskId || undefined,
+        imdb_id: debouncedImdb || undefined,
+        mal_id: debouncedMalId || undefined,
+        shikimori_id: debouncedShikimoriId || undefined,
+        mydramalist_id: debouncedMydramalistId || undefined,
+      }), 'violations_report.txt'),
+      disabled: total === 0,
+      icon: <FileText className="h-4 w-4" />,
       iconOnly: true,
     },
     {

@@ -5,17 +5,16 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/chromedp/chromedp"
 	"github.com/video-analitics/backend/pkg/captcha"
 	cdpopts "github.com/video-analitics/backend/pkg/chromedp"
 	"github.com/video-analitics/backend/pkg/logger"
+	"github.com/video-analitics/parser/internal/cache"
 )
 
-const (
-	profileDir     = "/data/browser-profile"
-	maxConcurrency = 3 // max parallel tabs
-)
+const profileDir = "/data/browser-profile"
 
 var (
 	global *GlobalBrowser
@@ -30,16 +29,22 @@ type GlobalBrowser struct {
 	browserCancel context.CancelFunc
 	solver        *captcha.PirateSolver
 	semaphore     chan struct{} // limits concurrent tabs
+	pageLoadDelay time.Duration
+	htmlCache     *cache.HTMLCache
 }
 
 // Init initializes the global browser singleton
 // Must be called once at application startup
-func Init(ctx context.Context, solver *captcha.PirateSolver) error {
+func Init(ctx context.Context, solver *captcha.PirateSolver, pageLoadDelay time.Duration, htmlCache *cache.HTMLCache, maxTabs int) error {
 	mu.Lock()
 	defer mu.Unlock()
 
 	if global != nil {
 		return fmt.Errorf("browser already initialized")
+	}
+
+	if maxTabs < 1 {
+		maxTabs = 10
 	}
 
 	if err := os.MkdirAll(profileDir, 0755); err != nil {
@@ -63,10 +68,12 @@ func Init(ctx context.Context, solver *captcha.PirateSolver) error {
 		browserCtx:    browserCtx,
 		browserCancel: browserCancel,
 		solver:        solver,
-		semaphore:     make(chan struct{}, maxConcurrency),
+		semaphore:     make(chan struct{}, maxTabs),
+		pageLoadDelay: pageLoadDelay,
+		htmlCache:     htmlCache,
 	}
 
-	logger.Log.Info().Str("profile", profileDir).Int("max_tabs", maxConcurrency).Msg("global browser initialized")
+	logger.Log.Info().Str("profile", profileDir).Int("max_tabs", maxTabs).Dur("page_load_delay", pageLoadDelay).Msg("global browser initialized")
 	return nil
 }
 

@@ -129,3 +129,7 @@ func (s *Service) CountByContentID(ctx context.Context, contentID string) (int64
 func (s *Service) GetPageIDsBySiteID(ctx context.Context, siteID string) ([]string, error) {
 	return s.repo.GetPageIDsBySiteID(ctx, siteID)
 }
+
+func (s *Service) DeleteBySiteID(ctx context.Context, siteID string) (int64, error) {
+	return s.repo.DeleteBySiteID(ctx, siteID)
+}

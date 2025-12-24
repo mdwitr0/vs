@@ -13,6 +13,7 @@ func GetExecAllocatorOptions() []chromedp.ExecAllocatorOption {
 		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("disable-setuid-sandbox", true),
+		chromedp.Flag("ignore-certificate-errors", true),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.Flag("disable-infobars", true),
 		chromedp.Flag("excludeSwitches", "enable-automation"),
@@ -46,11 +47,11 @@ func GetExecAllocatorOptions() []chromedp.ExecAllocatorOption {
 
 	// In Docker container, find the Chrome/Chromium executable
 	chromePaths := []string{
-		"/headless-shell/headless-shell",      // chromedp/headless-shell
-		"/usr/bin/chromium-browser",           // zenika/alpine-chrome
-		"/usr/bin/chromium",                   // some alpine images
-		"/usr/bin/google-chrome",              // debian-based images
-		"/usr/bin/google-chrome-stable",       // debian-based images
+		"/headless-shell/headless-shell", // chromedp/headless-shell
+		"/usr/bin/chromium-browser",      // zenika/alpine-chrome
+		"/usr/bin/chromium",              // some alpine images
+		"/usr/bin/google-chrome",         // debian-based images
+		"/usr/bin/google-chrome-stable",  // debian-based images
 	}
 	for _, p := range chromePaths {
 		if _, err := os.Stat(p); err == nil {

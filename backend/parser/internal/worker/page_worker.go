@@ -16,6 +16,7 @@ import (
 	"github.com/video-analitics/backend/pkg/nats"
 	"github.com/video-analitics/backend/pkg/queue"
 	"github.com/video-analitics/parser/internal/browser"
+	"github.com/video-analitics/parser/internal/cache"
 	"github.com/video-analitics/parser/internal/crawler"
 	"github.com/video-analitics/parser/internal/extractor"
 )
@@ -144,6 +145,16 @@ func (w *PageWorker) processPages(task *queue.PageCrawlTask, result *queue.PageC
 		}
 	}
 
+	// Initialize Bloom filter with existing URLs to avoid duplicates
+	bloomFilter := cache.NewURLBloomFilter(1_000_000, 0.001)
+	existingURLs, err := w.fetchAllURLs(bgCtx, task.IndexerAPIURL, task.SiteID)
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to fetch existing URLs for bloom filter")
+	} else {
+		bloomFilter.LoadBatch(existingURLs)
+		log.Info().Int("urls_loaded", len(existingURLs)).Msg("bloom filter initialized")
+	}
+
 	log.Info().Str("domain", task.Domain).Msg("starting page processing")
 
 	for {
@@ -203,7 +214,7 @@ func (w *PageWorker) processPages(task *queue.PageCrawlTask, result *queue.PageC
 				if pageDomain == "" {
 					pageDomain = task.Domain
 				}
-				w.extractAndPublishLinks(bgCtx, task.ID, task.SiteID, pageDomain, task.Domain, urlData.URL, html, urlData.Depth)
+				w.extractAndPublishLinks(bgCtx, task.ID, task.SiteID, pageDomain, task.Domain, urlData.URL, html, urlData.Depth, bloomFilter)
 			}
 
 			if pageResult.Success {
@@ -279,6 +290,42 @@ func (w *PageWorker) fetchPendingURLs(ctx context.Context, apiURL, siteID string
 		InRetry:      result.InRetry,
 		IndexedCount: result.IndexedURLs,
 	}, nil
+}
+
+type allURLsResponse struct {
+	URLs  []string `json:"urls"`
+	Count int      `json:"count"`
+}
+
+func (w *PageWorker) fetchAllURLs(ctx context.Context, apiURL, siteID string) ([]string, error) {
+	url := fmt.Sprintf("%s/api/internal/sites/%s/all-urls", apiURL, siteID)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if w.internalToken != "" {
+		req.Header.Set("Authorization", "Bearer "+w.internalToken)
+	}
+
+	resp, err := w.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result allURLsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return result.URLs, nil
 }
 
 func (w *PageWorker) parsePageSPA(pageURL, siteID string, newCookies *[]captcha.Cookie) queue.PageResult {
@@ -424,7 +471,7 @@ func isBadTitle(title string) bool {
 
 const maxLinkExtractionDepth = 3
 
-func (w *PageWorker) extractAndPublishLinks(ctx context.Context, taskID, siteID, filterDomain, targetDomain, pageURL, html string, currentDepth int) {
+func (w *PageWorker) extractAndPublishLinks(ctx context.Context, taskID, siteID, filterDomain, targetDomain, pageURL, html string, currentDepth int, bloomFilter *cache.URLBloomFilter) {
 	log := logger.Log
 
 	if currentDepth >= maxLinkExtractionDepth {
@@ -439,6 +486,7 @@ func (w *PageWorker) extractAndPublishLinks(ctx context.Context, taskID, siteID,
 	// Фильтруем только внутренние ссылки и нормализуем домен
 	var validLinks []queue.ParsedURLData
 	nextDepth := currentDepth + 1
+	skippedByBloom := 0
 
 	for _, link := range links {
 		if !w.isInternalLink(link, filterDomain) {
@@ -449,6 +497,15 @@ func (w *PageWorker) extractAndPublishLinks(ctx context.Context, taskID, siteID,
 		if normalizedURL == "" {
 			continue
 		}
+		// Check Bloom filter for duplicates
+		if bloomFilter != nil && bloomFilter.MayContain(normalizedURL) {
+			skippedByBloom++
+			continue
+		}
+		// Add to Bloom filter for future deduplication
+		if bloomFilter != nil {
+			bloomFilter.Add(normalizedURL)
+		}
 		validLinks = append(validLinks, queue.ParsedURLData{
 			URL:    normalizedURL,
 			Source: pageURL,
@@ -457,6 +514,9 @@ func (w *PageWorker) extractAndPublishLinks(ctx context.Context, taskID, siteID,
 	}
 
 	if len(validLinks) == 0 {
+		if skippedByBloom > 0 {
+			log.Debug().Str("url", pageURL).Int("skipped_bloom", skippedByBloom).Msg("all links filtered by bloom")
+		}
 		return
 	}
 
@@ -480,6 +540,7 @@ func (w *PageWorker) extractAndPublishLinks(ctx context.Context, taskID, siteID,
 		log.Debug().
 			Str("url", pageURL).
 			Int("links", len(validLinks)).
+			Int("skipped_bloom", skippedByBloom).
 			Int("depth", nextDepth).
 			Msg("extracted links published")
 	}

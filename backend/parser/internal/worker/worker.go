@@ -18,26 +18,25 @@ import (
 	"github.com/video-analitics/parser/internal/repo"
 )
 
-const (
-	crawlRateLimit   = 2 * time.Second
-	blockedThreshold = 3
-)
+const blockedThreshold = 3
 
 type Worker struct {
-	natsClient *nats.Client
-	publisher  *nats.Publisher
-	repo       *repo.PageRepo
-	meili      *meili.Client
-	extractor  *extractor.Extractor
+	natsClient     *nats.Client
+	publisher      *nats.Publisher
+	repo           *repo.PageRepo
+	meili          *meili.Client
+	extractor      *extractor.Extractor
+	crawlRateLimit time.Duration
 }
 
-func New(natsClient *nats.Client, r *repo.PageRepo, m *meili.Client) *Worker {
+func New(natsClient *nats.Client, r *repo.PageRepo, m *meili.Client, crawlRateLimit time.Duration) *Worker {
 	return &Worker{
-		natsClient: natsClient,
-		publisher:  nats.NewPublisher(natsClient),
-		repo:       r,
-		meili:      m,
-		extractor:  extractor.New(),
+		natsClient:     natsClient,
+		publisher:      nats.NewPublisher(natsClient),
+		repo:           r,
+		meili:          m,
+		extractor:      extractor.New(),
+		crawlRateLimit: crawlRateLimit,
 	}
 }
 
@@ -282,7 +281,7 @@ func (w *Worker) processURLs(ctx context.Context, urls []string, siteID string, 
 		result, err := browser.Get().FetchPage(ctx, pageURL)
 		if err != nil {
 			log.Debug().Err(err).Str("url", pageURL).Msg("page fetch failed")
-			time.Sleep(crawlRateLimit)
+			time.Sleep(w.crawlRateLimit)
 			continue
 		}
 
@@ -292,14 +291,14 @@ func (w *Worker) processURLs(ctx context.Context, urls []string, siteID string, 
 				log.Warn().Int("blocked", blockedCount).Msg("blocking threshold reached")
 				return pages, blockedCount
 			}
-			time.Sleep(crawlRateLimit)
+			time.Sleep(w.crawlRateLimit)
 			continue
 		}
 
 		page, err := w.extractor.Extract(result.HTML, pageURL, siteID, 200)
 		if err != nil {
 			log.Debug().Err(err).Str("url", pageURL).Msg("extraction failed")
-			time.Sleep(crawlRateLimit)
+			time.Sleep(w.crawlRateLimit)
 			continue
 		}
 
@@ -312,7 +311,7 @@ func (w *Worker) processURLs(ctx context.Context, urls []string, siteID string, 
 			}
 		}
 
-		time.Sleep(crawlRateLimit)
+		time.Sleep(w.crawlRateLimit)
 	}
 
 	return pages, blockedCount

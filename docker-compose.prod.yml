@@ -1,0 +1,189 @@
+services:
+  # MongoDB (4.4 for non-AVX CPUs)
+  mongodb:
+    image: mongo:4.4
+    container_name: va-prod-mongodb
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongo", "-u", "${MONGO_ROOT_USER}", "-p", "${MONGO_ROOT_PASSWORD}", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - internal
+
+  # Redis
+  redis:
+    image: redis:7.4-alpine
+    container_name: va-prod-redis
+    restart: always
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - internal
+
+  # NATS with JetStream
+  nats:
+    image: nats:2.10-alpine
+    container_name: va-prod-nats
+    restart: always
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "4222:4222"
+    volumes:
+      - nats_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - internal
+
+  # Meilisearch
+  meilisearch:
+    image: getmeili/meilisearch:v1.12
+    container_name: va-prod-meilisearch
+    restart: always
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: "true"
+    ports:
+      - "7700:7700"
+    volumes:
+      - meilisearch_data:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - internal
+
+  # Indexer service
+  indexer:
+    build:
+      context: ./backend
+      dockerfile: indexer/Dockerfile
+    container_name: va-prod-indexer
+    restart: always
+    environment:
+      PORT: "8080"
+      NATS_URL: nats://nats:4222
+      MONGO_URL: mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongodb:27017
+      MONGO_DB: ${MONGO_DB}
+      MEILI_URL: http://meilisearch:7700
+      MEILI_KEY: ${MEILI_MASTER_KEY}
+      INDEXER_API_URL: http://indexer:8080
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_LOGIN: ${ADMIN_LOGIN}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # Parser service
+  parser:
+    build:
+      context: ./backend
+      dockerfile: parser/Dockerfile
+    container_name: va-prod-parser
+    restart: always
+    environment:
+      NATS_URL: nats://nats:4222
+      MONGO_URL: mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongodb:27017
+      MONGO_DB: ${MONGO_DB}
+      MEILI_URL: http://meilisearch:7700
+      MEILI_KEY: ${MEILI_MASTER_KEY}
+      WORKER_COUNT: ${WORKER_COUNT}
+      MAX_BROWSER_TABS: ${MAX_BROWSER_TABS:-10}
+      HTTP_PORT: "8082"
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      HTML_CACHE_TTL: ${HTML_CACHE_TTL}
+      PAGE_LOAD_DELAY: ${PAGE_LOAD_DELAY}
+      CRAWL_RATE_LIMIT: ${CRAWL_RATE_LIMIT}
+    volumes:
+      - browser_profiles:/data/browser-profiles
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    shm_size: 1gb
+    deploy:
+      resources:
+        limits:
+          memory: 2.5G
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+    networks:
+      - internal
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: va-prod-frontend
+    restart: always
+    depends_on:
+      - indexer
+    networks:
+      - internal
+
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: va-prod-nginx
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - /opt/video-analitics/nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - indexer
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+  redis_data:
+  meilisearch_data:
+  nats_data:
+  browser_profiles:

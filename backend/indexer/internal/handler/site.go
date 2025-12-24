@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/video-analitics/backend/pkg/logger"
+	"github.com/video-analitics/backend/pkg/meili"
 	"github.com/video-analitics/backend/pkg/status"
 	"github.com/video-analitics/backend/pkg/violations"
 	"github.com/video-analitics/indexer/internal/middleware"
@@ -48,9 +49,10 @@ type SiteHandler struct {
 	userSiteRepo   *repo.UserSiteRepo
 	publisher      *queue.Publisher
 	violationsSvc  *violations.Service
+	meili          *meili.Client
 }
 
-func NewSiteHandler(siteRepo *repo.SiteRepo, pageRepo *repo.PageRepo, taskRepo *repo.ScanTaskRepo, sitemapURLRepo *repo.SitemapURLRepo, userSiteRepo *repo.UserSiteRepo, publisher *queue.Publisher, violationsSvc *violations.Service) *SiteHandler {
+func NewSiteHandler(siteRepo *repo.SiteRepo, pageRepo *repo.PageRepo, taskRepo *repo.ScanTaskRepo, sitemapURLRepo *repo.SitemapURLRepo, userSiteRepo *repo.UserSiteRepo, publisher *queue.Publisher, violationsSvc *violations.Service, meiliClient *meili.Client) *SiteHandler {
 	return &SiteHandler{
 		siteRepo:       siteRepo,
 		pageRepo:       pageRepo,
@@ -58,6 +60,7 @@ func NewSiteHandler(siteRepo *repo.SiteRepo, pageRepo *repo.PageRepo, taskRepo *
 		sitemapURLRepo: sitemapURLRepo,
 		userSiteRepo:   userSiteRepo,
 		publisher:      publisher,
+		meili:          meiliClient,
 		violationsSvc:  violationsSvc,
 	}
 }
@@ -391,12 +394,12 @@ func (h *SiteHandler) Get(c *fiber.Ctx) error {
 
 // SiteViolationResponse - нарушение для API сайта
 type SiteViolationResponse struct {
-	PageID      string `json:"page_id"`
-	ContentID   string `json:"content_id"`
-	URL         string `json:"url"`
-	Title       string `json:"title"`
-	MatchType   string `json:"match_type"`
-	FoundAt     string `json:"found_at"`
+	PageID    string `json:"page_id"`
+	ContentID string `json:"content_id"`
+	URL       string `json:"url"`
+	Title     string `json:"title"`
+	MatchType string `json:"match_type"`
+	FoundAt   string `json:"found_at"`
 }
 
 type ListSiteViolationsResponse struct {
@@ -673,6 +676,7 @@ func (h *SiteHandler) ScanPages(c *fiber.Ctx) error {
 // @Failure 404 {object} ErrorResponse
 // @Router /api/sites/{id} [delete]
 func (h *SiteHandler) Delete(c *fiber.Ctx) error {
+	log := logger.Log
 	id := c.Params("id")
 
 	_, err := h.checkSiteAccess(c, id)
@@ -683,6 +687,22 @@ func (h *SiteHandler) Delete(c *fiber.Ctx) error {
 	pagesDeleted, _ := h.pageRepo.DeleteBySiteID(c.Context(), id)
 	tasksDeleted, _ := h.taskRepo.DeleteBySiteID(c.Context(), id)
 	h.userSiteRepo.DeleteBySiteID(c.Context(), id)
+
+	// Удаляем страницы из Meilisearch
+	if h.meili != nil {
+		if err := h.meili.DeleteBySiteID(id); err != nil {
+			log.Warn().Err(err).Str("site_id", id).Msg("failed to delete pages from meilisearch")
+		}
+	}
+
+	// Удаляем violations
+	if h.violationsSvc != nil {
+		if deleted, err := h.violationsSvc.DeleteBySiteID(c.Context(), id); err != nil {
+			log.Warn().Err(err).Str("site_id", id).Msg("failed to delete violations")
+		} else if deleted > 0 {
+			log.Info().Int64("count", deleted).Str("site_id", id).Msg("violations deleted")
+		}
+	}
 
 	if err := h.siteRepo.Delete(c.Context(), id); err != nil {
 		return c.Status(500).JSON(ErrorResponse{Error: "failed to delete site"})
@@ -821,6 +841,7 @@ type DeleteSitesResponse struct {
 // @Failure 400 {object} ErrorResponse
 // @Router /api/sites/delete [post]
 func (h *SiteHandler) DeleteBulk(c *fiber.Ctx) error {
+	log := logger.Log
 	userID := middleware.GetUserID(c)
 	isAdmin := middleware.IsAdmin(c)
 
@@ -843,6 +864,19 @@ func (h *SiteHandler) DeleteBulk(c *fiber.Ctx) error {
 		pages, _ := h.pageRepo.DeleteBySiteID(c.Context(), id)
 		tasks, _ := h.taskRepo.DeleteBySiteID(c.Context(), id)
 		h.userSiteRepo.DeleteBySiteID(c.Context(), id)
+
+		// Удаляем страницы из Meilisearch
+		if h.meili != nil {
+			if err := h.meili.DeleteBySiteID(id); err != nil {
+				log.Warn().Err(err).Str("site_id", id).Msg("failed to delete pages from meilisearch")
+			}
+		}
+
+		// Удаляем violations
+		if h.violationsSvc != nil {
+			h.violationsSvc.DeleteBySiteID(c.Context(), id)
+		}
+
 		if err := h.siteRepo.Delete(c.Context(), id); err == nil {
 			deleted++
 			pagesDeleted += pages

@@ -14,7 +14,6 @@ const contentCollection = "content"
 
 type Content struct {
 	ID              primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	OwnerID         primitive.ObjectID `bson:"owner_id,omitempty" json:"owner_id,omitempty"`
 	Title           string             `bson:"title" json:"title"`
 	OriginalTitle   string             `bson:"original_title,omitempty" json:"original_title,omitempty"`
 	Year            int                `bson:"year,omitempty" json:"year,omitempty"`
@@ -39,15 +38,14 @@ func NewContentRepo(db *mongo.Database) *ContentRepo {
 	defer cancel()
 
 	indexes := []mongo.IndexModel{
-		{Keys: bson.D{{Key: "kinopoisk_id", Value: 1}}, Options: options.Index().SetSparse(true)},
-		{Keys: bson.D{{Key: "imdb_id", Value: 1}}, Options: options.Index().SetSparse(true)},
-		{Keys: bson.D{{Key: "mal_id", Value: 1}}, Options: options.Index().SetSparse(true)},
-		{Keys: bson.D{{Key: "shikimori_id", Value: 1}}, Options: options.Index().SetSparse(true)},
-		{Keys: bson.D{{Key: "mydramalist_id", Value: 1}}, Options: options.Index().SetSparse(true)},
+		{Keys: bson.D{{Key: "kinopoisk_id", Value: 1}}, Options: options.Index().SetUnique(true).SetSparse(true)},
+		{Keys: bson.D{{Key: "imdb_id", Value: 1}}, Options: options.Index().SetUnique(true).SetSparse(true)},
+		{Keys: bson.D{{Key: "mal_id", Value: 1}}, Options: options.Index().SetUnique(true).SetSparse(true)},
+		{Keys: bson.D{{Key: "shikimori_id", Value: 1}}, Options: options.Index().SetUnique(true).SetSparse(true)},
+		{Keys: bson.D{{Key: "mydramalist_id", Value: 1}}, Options: options.Index().SetUnique(true).SetSparse(true)},
 		{Keys: bson.D{{Key: "title", Value: "text"}}},
 		{Keys: bson.D{{Key: "created_at", Value: -1}}},
 		{Keys: bson.D{{Key: "violations_count", Value: -1}, {Key: "created_at", Value: -1}}},
-		{Keys: bson.D{{Key: "owner_id", Value: 1}}},
 	}
 	coll.Indexes().CreateMany(ctx, indexes)
 
@@ -198,17 +196,9 @@ func (r *ContentRepo) UpdateViolationsCount(ctx context.Context, id string, viol
 	return err
 }
 
-func (r *ContentRepo) FindByUserAccess(ctx context.Context, userID string, isAdmin bool, f ContentFilter) ([]Content, int64, error) {
-	if isAdmin {
-		return r.FindAll(ctx, f)
-	}
+func (r *ContentRepo) FindByIDs(ctx context.Context, ids []primitive.ObjectID, f ContentFilter) ([]Content, int64, error) {
+	filter := bson.M{"_id": bson.M{"$in": ids}}
 
-	userOID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	filter := bson.M{"owner_id": userOID}
 	if f.Title != "" {
 		filter["$text"] = bson.M{"$search": f.Title}
 	}
@@ -274,23 +264,64 @@ func (r *ContentRepo) FindByUserAccess(ctx context.Context, userID string, isAdm
 	return contents, total, nil
 }
 
-func (r *ContentRepo) HasUserAccess(ctx context.Context, contentID, userID string, isAdmin bool) (bool, error) {
-	if isAdmin {
-		return true, nil
+func (r *ContentRepo) FindByExternalID(ctx context.Context, c *Content) (*Content, error) {
+	var conditions []bson.M
+
+	if c.KinopoiskID != "" {
+		conditions = append(conditions, bson.M{"kinopoisk_id": c.KinopoiskID})
+	}
+	if c.IMDBID != "" {
+		conditions = append(conditions, bson.M{"imdb_id": c.IMDBID})
+	}
+	if c.MALID != "" {
+		conditions = append(conditions, bson.M{"mal_id": c.MALID})
+	}
+	if c.ShikimoriID != "" {
+		conditions = append(conditions, bson.M{"shikimori_id": c.ShikimoriID})
+	}
+	if c.MyDramaListID != "" {
+		conditions = append(conditions, bson.M{"mydramalist_id": c.MyDramaListID})
 	}
 
-	content, err := r.FindByID(ctx, contentID)
+	if len(conditions) == 0 {
+		return nil, nil
+	}
+
+	var existing Content
+	err := r.coll.FindOne(ctx, bson.M{"$or": conditions}).Decode(&existing)
+	if err == mongo.ErrNoDocuments {
+		return nil, nil
+	}
 	if err != nil {
-		return false, err
-	}
-	if content == nil {
-		return false, nil
+		return nil, err
 	}
 
-	userOID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		return false, err
+	return &existing, nil
+}
+
+func (r *ContentRepo) EnrichExternalIDs(ctx context.Context, id primitive.ObjectID, c *Content) error {
+	update := bson.M{}
+
+	if c.KinopoiskID != "" {
+		update["kinopoisk_id"] = c.KinopoiskID
+	}
+	if c.IMDBID != "" {
+		update["imdb_id"] = c.IMDBID
+	}
+	if c.MALID != "" {
+		update["mal_id"] = c.MALID
+	}
+	if c.ShikimoriID != "" {
+		update["shikimori_id"] = c.ShikimoriID
+	}
+	if c.MyDramaListID != "" {
+		update["mydramalist_id"] = c.MyDramaListID
 	}
 
-	return content.OwnerID == userOID, nil
+	if len(update) == 0 {
+		return nil
+	}
+
+	_, err := r.coll.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": update})
+	return err
 }

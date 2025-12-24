@@ -427,3 +427,12 @@ func (r *Repository) DeleteByContentAndSiteNotInPageIDs(ctx context.Context, con
 	_, err := r.coll.DeleteMany(ctx, filter)
 	return err
 }
+
+// DeleteBySiteID удаляет все violations для сайта
+func (r *Repository) DeleteBySiteID(ctx context.Context, siteID string) (int64, error) {
+	result, err := r.coll.DeleteMany(ctx, bson.M{"site_id": siteID})
+	if err != nil {
+		return 0, err
+	}
+	return result.DeletedCount, nil
+}

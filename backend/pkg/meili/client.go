@@ -33,7 +33,6 @@ type PageDocument struct {
 	IndexedAt     string   `json:"indexed_at"`
 }
 
-
 // Client обёртка над meilisearch-go клиентом
 type Client struct {
 	client meilisearch.ServiceManager
@@ -194,7 +193,6 @@ func (c *Client) IndexPages(docs []PageDocument) error {
 	_, err := c.client.Index(PagesIndex).AddDocuments(maps, &pk)
 	return err
 }
-
 
 // SearchResult результат поиска
 type SearchResult struct {
@@ -367,6 +365,11 @@ func (c *Client) DeleteAllDocuments() error {
 	return err
 }
 
+// DeleteBySiteID удаляет все страницы сайта из индекса
+func (c *Client) DeleteBySiteID(siteID string) error {
+	_, err := c.client.Index(PagesIndex).DeleteDocumentsByFilter("site_id = \"" + siteID + "\"")
+	return err
+}
 
 // docToMap конвертирует PageDocument в map
 func docToMap(doc *PageDocument) map[string]interface{} {

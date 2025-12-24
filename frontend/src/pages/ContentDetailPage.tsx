@@ -1,12 +1,12 @@
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { contentApi } from '@/lib/api'
+import { contentApi, downloadFile } from '@/lib/api'
 import type { Violation } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Pagination } from '@/components/ui/pagination'
 import { CopyButton } from '@/components/ui/copy-button'
+import { Download, FileText, RefreshCw } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -15,15 +15,17 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { useState } from 'react'
 
 function formatDate(dateString: string | undefined): string {
   if (!dateString) return '-'
   return new Date(dateString).toLocaleString('ru-RU')
-}
-
-function downloadViolationsCsv(contentId: string) {
-  window.open(contentApi.exportViolationsUrl(contentId), '_blank')
 }
 
 export function ContentDetailPage() {
@@ -104,182 +106,119 @@ export function ContentDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Link to="/content">
-          <Button variant="outline" size="sm">
-            ← Назад
-          </Button>
-        </Link>
-        <div>
-          <h1 className="text-2xl font-semibold">{content.title}</h1>
-          {content.original_title && (
-            <p className="text-muted-foreground">{content.original_title}</p>
-          )}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Link to="/content">
+            <Button variant="outline" size="sm">
+              ← Назад
+            </Button>
+          </Link>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-semibold">{content.title}</h1>
+              {content.year && (
+                <span className="text-muted-foreground">({content.year})</span>
+              )}
+            </div>
+            {content.original_title && (
+              <p className="text-muted-foreground text-sm">{content.original_title}</p>
+            )}
+          </div>
         </div>
-        {content.year && (
-          <span className="text-muted-foreground">({content.year})</span>
-        )}
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Нарушений:</span>
+          <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-white ${content.violations_count > 0 ? 'bg-destructive' : 'bg-muted'}`}>
+            {content.violations_count}
+          </span>
+          <span className="text-muted-foreground">на {content.sites_count} сайтах</span>
+        </div>
       </div>
 
-      {/* Content Info */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Kinopoisk ID
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              {content.kinopoisk_id ? (
-                <>
-                  <a href={`https://kinopoisk.ru/film/${content.kinopoisk_id}`} target="_blank" rel="noopener noreferrer" className="text-lg font-medium hover:underline">
-                    {content.kinopoisk_id}
-                  </a>
-                  <CopyButton text={`https://kinopoisk.ru/film/${content.kinopoisk_id}`} />
-                </>
-              ) : (
-                <span className="text-lg font-medium">-</span>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              IMDB ID
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              {content.imdb_id ? (
-                <>
-                  <a href={`https://imdb.com/title/${content.imdb_id}`} target="_blank" rel="noopener noreferrer" className="text-lg font-medium hover:underline">
-                    {content.imdb_id}
-                  </a>
-                  <CopyButton text={`https://imdb.com/title/${content.imdb_id}`} />
-                </>
-              ) : (
-                <span className="text-lg font-medium">-</span>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              MyAnimeList ID
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              {content.mal_id ? (
-                <>
-                  <a href={`https://myanimelist.net/anime/${content.mal_id}`} target="_blank" rel="noopener noreferrer" className="text-lg font-medium hover:underline">
-                    {content.mal_id}
-                  </a>
-                  <CopyButton text={`https://myanimelist.net/anime/${content.mal_id}`} />
-                </>
-              ) : (
-                <span className="text-lg font-medium">-</span>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Shikimori ID
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              {content.shikimori_id ? (
-                <>
-                  <a href={`https://shikimori.one/animes/${content.shikimori_id}`} target="_blank" rel="noopener noreferrer" className="text-lg font-medium hover:underline">
-                    {content.shikimori_id}
-                  </a>
-                  <CopyButton text={`https://shikimori.one/animes/${content.shikimori_id}`} />
-                </>
-              ) : (
-                <span className="text-lg font-medium">-</span>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              MyDramaList ID
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              {content.mydramalist_id ? (
-                <>
-                  <a href={`https://mydramalist.com/${content.mydramalist_id}`} target="_blank" rel="noopener noreferrer" className="text-lg font-medium hover:underline">
-                    {content.mydramalist_id}
-                  </a>
-                  <CopyButton text={`https://mydramalist.com/${content.mydramalist_id}`} />
-                </>
-              ) : (
-                <span className="text-lg font-medium">-</span>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Нарушений
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              <Badge variant={content.violations_count > 0 ? 'destructive' : 'secondary'} className="text-lg px-3 py-1">
-                {content.violations_count}
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Сайтов с нарушениями
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{content.sites_count}</div>
-          </CardContent>
-        </Card>
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        {content.kinopoisk_id && (
+          <span className="inline-flex items-center gap-1">
+            <span className="text-muted-foreground">KP:</span>
+            <a href={`https://kinopoisk.ru/film/${content.kinopoisk_id}`} target="_blank" rel="noopener noreferrer" className="hover:underline">{content.kinopoisk_id}</a>
+            <CopyButton text={`https://kinopoisk.ru/film/${content.kinopoisk_id}`} />
+          </span>
+        )}
+        {content.imdb_id && (
+          <span className="inline-flex items-center gap-1">
+            <span className="text-muted-foreground">IMDB:</span>
+            <a href={`https://imdb.com/title/${content.imdb_id}`} target="_blank" rel="noopener noreferrer" className="hover:underline">{content.imdb_id}</a>
+            <CopyButton text={`https://imdb.com/title/${content.imdb_id}`} />
+          </span>
+        )}
+        {content.mal_id && (
+          <span className="inline-flex items-center gap-1">
+            <span className="text-muted-foreground">MAL:</span>
+            <a href={`https://myanimelist.net/anime/${content.mal_id}`} target="_blank" rel="noopener noreferrer" className="hover:underline">{content.mal_id}</a>
+            <CopyButton text={`https://myanimelist.net/anime/${content.mal_id}`} />
+          </span>
+        )}
+        {content.shikimori_id && (
+          <span className="inline-flex items-center gap-1">
+            <span className="text-muted-foreground">Shikimori:</span>
+            <a href={`https://shikimori.one/animes/${content.shikimori_id}`} target="_blank" rel="noopener noreferrer" className="hover:underline">{content.shikimori_id}</a>
+            <CopyButton text={`https://shikimori.one/animes/${content.shikimori_id}`} />
+          </span>
+        )}
+        {content.mydramalist_id && (
+          <span className="inline-flex items-center gap-1">
+            <span className="text-muted-foreground">MDL:</span>
+            <a href={`https://mydramalist.com/${content.mydramalist_id}`} target="_blank" rel="noopener noreferrer" className="hover:underline">{content.mydramalist_id}</a>
+            <CopyButton text={`https://mydramalist.com/${content.mydramalist_id}`} />
+          </span>
+        )}
       </div>
 
       {/* Violations Table */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold">Нарушения</h2>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-            >
-              {isRefreshing ? 'Обновление...' : 'Проверить нарушения'}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => downloadViolationsCsv(id!)}
-              disabled={content.violations_count === 0}
-            >
-              Экспорт CSV
-            </Button>
-          </div>
+          <TooltipProvider>
+            <div className="flex gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleRefresh}
+                    disabled={isRefreshing}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Проверить нарушения</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => downloadFile(contentApi.exportViolationsUrl(id!), 'violations.csv')}
+                    disabled={content.violations_count === 0}
+                  >
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Скачать CSV</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => downloadFile(contentApi.exportViolationsTextUrl(id!), 'violations.txt')}
+                    disabled={content.violations_count === 0}
+                  >
+                    <FileText className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Скачать отчёт</TooltipContent>
+              </Tooltip>
+            </div>
+          </TooltipProvider>
         </div>
 
         {violationsQuery.isLoading && (

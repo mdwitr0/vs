@@ -1,2 +1,5 @@
 .env
+.env.prod
+.env.local
 .claude
+nginx/ssl/

@@ -35,6 +35,8 @@ type ScanTask struct {
 	PageResult    *StageResult       `bson:"page_result,omitempty" json:"page_result,omitempty"`
 	CreatedAt     time.Time          `bson:"created_at" json:"created_at"`
 	FinishedAt    *time.Time         `bson:"finished_at,omitempty" json:"finished_at,omitempty"`
+	RetryCount    int                `bson:"retry_count" json:"retry_count"`
+	NextRetryAt   *time.Time         `bson:"next_retry_at,omitempty" json:"next_retry_at,omitempty"`
 	Version       int                `bson:"version" json:"-"`
 }
 
@@ -54,6 +56,7 @@ func NewScanTaskRepo(db *mongo.Database) *ScanTaskRepo {
 		{Keys: bson.D{{Key: "status", Value: 1}, {Key: "created_at", Value: -1}}},
 		{Keys: bson.D{{Key: "site_id", Value: 1}, {Key: "status", Value: 1}}},
 		{Keys: bson.D{{Key: "stage", Value: 1}, {Key: "created_at", Value: -1}}},
+		{Keys: bson.D{{Key: "status", Value: 1}, {Key: "next_retry_at", Value: 1}}},
 	}
 	coll.Indexes().CreateMany(ctx, indexes)
 
@@ -438,11 +441,11 @@ func (r *ScanTaskRepo) CompletePageStage(ctx context.Context, taskID string, pag
 	now := time.Now()
 
 	update := bson.M{
-		"status":                   status.TaskCompleted,
-		"stage":                    status.StageDone,
-		"page_result.status":       status.TaskCompleted,
-		"page_result.finished_at":  now,
-		"finished_at":              now,
+		"status":                  status.TaskCompleted,
+		"stage":                   status.StageDone,
+		"page_result.status":      status.TaskCompleted,
+		"page_result.finished_at": now,
+		"finished_at":             now,
 	}
 
 	// only set error if provided
@@ -472,11 +475,11 @@ func (r *ScanTaskRepo) FailPageStage(ctx context.Context, taskID string, pageRes
 	now := time.Now()
 
 	update := bson.M{
-		"status":                   status.TaskFailed,
-		"stage":                    status.StageDone,
-		"page_result.status":       status.TaskFailed,
-		"page_result.finished_at":  now,
-		"finished_at":              now,
+		"status":                  status.TaskFailed,
+		"stage":                   status.StageDone,
+		"page_result.status":      status.TaskFailed,
+		"page_result.finished_at": now,
+		"finished_at":             now,
 	}
 
 	// set error if provided
@@ -786,6 +789,11 @@ func (r *ScanTaskRepo) FindStaleTasks(ctx context.Context, pendingTimeout, proce
 // MarkFailed marks a task as failed with an error message
 // Also updates sitemap_result and page_result statuses if they are in processing state
 func (r *ScanTaskRepo) MarkFailed(ctx context.Context, taskID, errMsg string) error {
+	return r.MarkFailedWithRetry(ctx, taskID, errMsg, nil)
+}
+
+// MarkFailedWithRetry marks a task as failed and schedules next retry
+func (r *ScanTaskRepo) MarkFailedWithRetry(ctx context.Context, taskID, errMsg string, nextRetryAt *time.Time) error {
 	oid, err := primitive.ObjectIDFromHex(taskID)
 	if err != nil {
 		return err
@@ -802,6 +810,10 @@ func (r *ScanTaskRepo) MarkFailed(ctx context.Context, taskID, errMsg string) er
 	update := bson.M{
 		"status":      status.TaskFailed,
 		"finished_at": now,
+	}
+
+	if nextRetryAt != nil {
+		update["next_retry_at"] = *nextRetryAt
 	}
 
 	// Update sitemap_result if it's still processing
@@ -864,4 +876,75 @@ func (r *ScanTaskRepo) UpdateProgress(ctx context.Context, progress interface{})
 func (r *ScanTaskRepo) UpdateFromResult(ctx context.Context, result interface{}) error {
 	// Legacy method - the new two-stage system uses CompleteSitemapStage/CompletePageStage
 	return nil
+}
+
+// FindFailedTasksForRetry finds failed tasks eligible for retry
+// Returns tasks where: status=failed, retry_count < maxRetries, next_retry_at <= now
+func (r *ScanTaskRepo) FindFailedTasksForRetry(ctx context.Context, maxRetries int) ([]ScanTask, error) {
+	now := time.Now()
+
+	cursor, err := r.coll.Find(ctx, bson.M{
+		"status":      status.TaskFailed,
+		"retry_count": bson.M{"$lt": maxRetries},
+		"$or": []bson.M{
+			{"next_retry_at": bson.M{"$lte": now}},
+			{"next_retry_at": bson.M{"$exists": false}},
+			{"next_retry_at": nil},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var tasks []ScanTask
+	if err := cursor.All(ctx, &tasks); err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+// IncrementRetryAndReset increments retry count and resets task to pending status
+func (r *ScanTaskRepo) IncrementRetryAndReset(ctx context.Context, taskID string) error {
+	oid, err := primitive.ObjectIDFromHex(taskID)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+
+	// Get current task to restore stage results
+	var task ScanTask
+	if err := r.coll.FindOne(ctx, bson.M{"_id": oid}).Decode(&task); err != nil {
+		return err
+	}
+
+	update := bson.M{
+		"status":        status.TaskProcessing,
+		"finished_at":   nil,
+		"next_retry_at": nil,
+	}
+
+	// Reset the failed stage result to processing
+	if task.Stage == status.StageSitemap && task.SitemapResult != nil {
+		update["sitemap_result.status"] = status.TaskProcessing
+		update["sitemap_result.started_at"] = now
+		update["sitemap_result.finished_at"] = nil
+		update["sitemap_result.error"] = ""
+	} else if task.Stage == status.StagePage && task.PageResult != nil {
+		update["page_result.status"] = status.TaskProcessing
+		update["page_result.started_at"] = now
+		update["page_result.finished_at"] = nil
+		update["page_result.error"] = ""
+	}
+
+	_, err = r.coll.UpdateOne(
+		ctx,
+		bson.M{"_id": oid, "status": status.TaskFailed},
+		bson.M{
+			"$set": update,
+			"$inc": bson.M{"version": 1, "retry_count": 1},
+		},
+	)
+	return err
 }

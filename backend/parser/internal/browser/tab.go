@@ -13,10 +13,7 @@ import (
 	"github.com/video-analitics/backend/pkg/logger"
 )
 
-const (
-	defaultTabTimeout = 60 * time.Second
-	pageLoadDelay     = 2 * time.Second
-)
+const defaultTabTimeout = 60 * time.Second
 
 // FetchResult represents the result of fetching a URL
 type FetchResult struct {
@@ -26,16 +23,29 @@ type FetchResult struct {
 	IsCaptcha   bool
 	BlockReason string
 	Cookies     []captcha.Cookie
+	FromCache   bool
 }
 
 // FetchPage loads a page in a new tab, handles blocking/captcha, returns clean HTML
 func (b *GlobalBrowser) FetchPage(ctx context.Context, url string) (*FetchResult, error) {
+	log := logger.Log
+
+	// Check cache first
+	if b.htmlCache != nil {
+		if html, found := b.htmlCache.Get(ctx, url); found {
+			log.Debug().Str("url", url).Msg("html cache hit")
+			return &FetchResult{
+				HTML:      html,
+				FinalURL:  url,
+				FromCache: true,
+			}, nil
+		}
+	}
+
 	if err := b.AcquireWithContext(ctx); err != nil {
 		return nil, fmt.Errorf("acquire browser slot: %w", err)
 	}
 	defer b.Release()
-
-	log := logger.Log
 
 	tabCtx, tabCancel := chromedp.NewContext(b.browserCtx)
 	defer tabCancel()
@@ -62,7 +72,7 @@ func (b *GlobalBrowser) FetchPage(ctx context.Context, url string) (*FetchResult
 		}),
 		chromedp.Navigate(url),
 		chromedp.WaitReady("body", chromedp.ByQuery),
-		chromedp.Sleep(pageLoadDelay),
+		chromedp.Sleep(b.pageLoadDelay),
 		chromedp.Location(&finalURL),
 		chromedp.OuterHTML("html", &html),
 	}
@@ -133,6 +143,13 @@ func (b *GlobalBrowser) FetchPage(ctx context.Context, url string) (*FetchResult
 	// Get cookies
 	cookies, _ := b.getCookies(timeoutCtx)
 
+	// Cache the HTML for future requests
+	if b.htmlCache != nil && html != "" {
+		if err := b.htmlCache.Set(ctx, url, html); err != nil {
+			log.Debug().Err(err).Str("url", url).Msg("html cache set error")
+		}
+	}
+
 	return &FetchResult{
 		HTML:     html,
 		FinalURL: finalURL,
@@ -172,7 +189,7 @@ func (b *GlobalBrowser) FetchSitemap(ctx context.Context, sitemapURL string) (*F
 			return err
 		}),
 		chromedp.Navigate(sitemapURL),
-		chromedp.Sleep(pageLoadDelay),
+		chromedp.Sleep(b.pageLoadDelay),
 		chromedp.Evaluate(getSitemapExtractScript(), &body),
 	}
 
@@ -207,7 +224,7 @@ func (b *GlobalBrowser) FetchSitemap(ctx context.Context, sitemapURL string) (*F
 		var newBody string
 		refetchTasks := chromedp.Tasks{
 			chromedp.Navigate(sitemapURL),
-			chromedp.Sleep(pageLoadDelay),
+			chromedp.Sleep(b.pageLoadDelay),
 			chromedp.Evaluate(getSitemapExtractScript(), &newBody),
 		}
 

@@ -66,6 +66,7 @@ func main() {
 	pageRepo := repo.NewPageRepo(db)
 	taskRepo := repo.NewScanTaskRepo(db)
 	contentRepo := repo.NewContentRepo(db)
+	userContentRepo := repo.NewUserContentRepo(db)
 	sitemapURLRepo := repo.NewSitemapURLRepo(db)
 	userRepo := repo.NewUserRepo(db)
 	refreshTokenRepo := repo.NewRefreshTokenRepo(db)
@@ -88,11 +89,11 @@ func main() {
 	progressSvc := service.NewTaskProgressService(taskRepo, sitemapURLRepo)
 
 	// Handlers - получают violationsSvc для работы с нарушениями
-	siteHandler := handler.NewSiteHandler(siteRepo, pageRepo, taskRepo, sitemapURLRepo, userSiteRepo, publisher, violationsSvc)
+	siteHandler := handler.NewSiteHandler(siteRepo, pageRepo, taskRepo, sitemapURLRepo, userSiteRepo, publisher, violationsSvc, meiliClient)
 	scanHandler := handler.NewScanHandler(siteRepo, taskRepo, sitemapURLRepo, userSiteRepo, publisher)
 	pageHandler := handler.NewPageHandler(pageRepo, violationsSvc)
 	taskHandler := handler.NewTaskHandler(taskRepo, db)
-	contentHandler := handler.NewContentHandler(contentRepo, siteRepo, violationsSvc)
+	contentHandler := handler.NewContentHandler(contentRepo, userContentRepo, siteRepo, violationsSvc)
 	sitemapURLHandler := handler.NewSitemapURLHandler(sitemapURLRepo)
 	authHandler := handler.NewAuthHandler(userRepo, refreshTokenRepo, cfg.JWTSecret, cfg.JWTAccessExpiry, cfg.JWTRefreshExpiry)
 	userHandler := handler.NewUserHandler(userRepo)
@@ -116,6 +117,7 @@ func main() {
 	// Internal API routes (for parser, protected by internal token)
 	internal := api.Group("/internal", middleware.InternalAuth(cfg.InternalAPIToken))
 	internal.Get("/sites/:id/pending-urls", sitemapURLHandler.GetPending)
+	internal.Get("/sites/:id/all-urls", sitemapURLHandler.GetAllURLs)
 
 	// Protected auth routes
 	authGroup := api.Group("/auth", middleware.AuthMiddleware(cfg.JWTSecret))
@@ -147,6 +149,7 @@ func main() {
 	protected.Delete("/sites/:id", siteHandler.Delete)
 	protected.Post("/sites/scan", scanHandler.StartScan)
 	protected.Post("/sites/delete", siteHandler.DeleteBulk)
+	protected.Get("/pages/export", pageHandler.ExportCSV)
 	protected.Get("/pages", pageHandler.List)
 	protected.Get("/pages/stats", pageHandler.Stats)
 	protected.Get("/scan-tasks", taskHandler.List)
@@ -154,12 +157,15 @@ func main() {
 	protected.Post("/scan-tasks/cancel", taskHandler.Cancel)
 	protected.Post("/content", contentHandler.Create)
 	protected.Post("/content/batch", contentHandler.CreateBatch)
+	protected.Get("/content/export", contentHandler.ExportCSV)
+	protected.Get("/content/violations/export-text", contentHandler.ExportAllViolationsText)
 	protected.Get("/content", contentHandler.List)
 	protected.Post("/content/check-violations", contentHandler.CheckViolations)
 	protected.Post("/content/delete", contentHandler.DeleteBulk)
 	protected.Get("/content/:id", contentHandler.Get)
 	protected.Get("/content/:id/violations", contentHandler.GetViolations)
 	protected.Get("/content/:id/violations/export", contentHandler.ExportViolationsCSV)
+	protected.Get("/content/:id/violations/export-text", contentHandler.ExportViolationsText)
 	protected.Delete("/content/:id", contentHandler.Delete)
 
 	app.Get("/health", func(c *fiber.Ctx) error {

@@ -15,16 +15,18 @@ import (
 )
 
 type ContentHandler struct {
-	contentRepo   *repo.ContentRepo
-	siteRepo      *repo.SiteRepo
-	violationsSvc *violations.Service
+	contentRepo     *repo.ContentRepo
+	userContentRepo *repo.UserContentRepo
+	siteRepo        *repo.SiteRepo
+	violationsSvc   *violations.Service
 }
 
-func NewContentHandler(contentRepo *repo.ContentRepo, siteRepo *repo.SiteRepo, violationsSvc *violations.Service) *ContentHandler {
+func NewContentHandler(contentRepo *repo.ContentRepo, userContentRepo *repo.UserContentRepo, siteRepo *repo.SiteRepo, violationsSvc *violations.Service) *ContentHandler {
 	return &ContentHandler{
-		contentRepo:   contentRepo,
-		siteRepo:      siteRepo,
-		violationsSvc: violationsSvc,
+		contentRepo:     contentRepo,
+		userContentRepo: userContentRepo,
+		siteRepo:        siteRepo,
+		violationsSvc:   violationsSvc,
 	}
 }
 
@@ -39,7 +41,6 @@ type CreateContentRequest struct {
 	MyDramaListID string `json:"mydramalist_id,omitempty"`
 }
 
-// ContentWithStats - контент со статистикой нарушений
 type ContentWithStats struct {
 	repo.Content
 	ViolationsCount int64 `json:"violations_count"`
@@ -48,7 +49,7 @@ type ContentWithStats struct {
 
 // Create godoc
 // @Summary Create content
-// @Description Add content to track for violations
+// @Description Add content to track for violations. If content already exists (by external ID), links it to user.
 // @Tags content
 // @Accept json
 // @Produce json
@@ -58,7 +59,6 @@ type ContentWithStats struct {
 // @Router /api/content [post]
 func (h *ContentHandler) Create(c *fiber.Ctx) error {
 	userID := middleware.GetUserID(c)
-	isAdmin := middleware.IsAdmin(c)
 
 	var req CreateContentRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -73,17 +73,12 @@ func (h *ContentHandler) Create(c *fiber.Ctx) error {
 		return c.Status(400).JSON(ErrorResponse{Error: "at least one ID is required (kinopoisk_id, imdb_id, mal_id, shikimori_id, mydramalist_id)"})
 	}
 
-	var ownerOID primitive.ObjectID
-	if !isAdmin && userID != "" {
-		var err error
-		ownerOID, err = primitive.ObjectIDFromHex(userID)
-		if err != nil {
-			return c.Status(500).JSON(ErrorResponse{Error: "invalid user id"})
-		}
+	userOID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return c.Status(500).JSON(ErrorResponse{Error: "invalid user id"})
 	}
 
 	content := &repo.Content{
-		OwnerID:       ownerOID,
 		Title:         req.Title,
 		OriginalTitle: req.OriginalTitle,
 		Year:          req.Year,
@@ -94,8 +89,36 @@ func (h *ContentHandler) Create(c *fiber.Ctx) error {
 		MyDramaListID: req.MyDramaListID,
 	}
 
+	existing, err := h.contentRepo.FindByExternalID(c.Context(), content)
+	if err != nil {
+		return c.Status(500).JSON(ErrorResponse{Error: "failed to check existing content"})
+	}
+
+	if existing != nil {
+		h.contentRepo.EnrichExternalIDs(c.Context(), existing.ID, content)
+
+		if err := h.userContentRepo.Link(c.Context(), userOID, existing.ID); err != nil {
+			return c.Status(500).JSON(ErrorResponse{Error: "failed to link content"})
+		}
+
+		updated, _ := h.contentRepo.FindByID(c.Context(), existing.ID.Hex())
+		if updated == nil {
+			updated = existing
+		}
+
+		return c.Status(200).JSON(ContentWithStats{
+			Content:         *updated,
+			ViolationsCount: updated.ViolationsCount,
+			SitesCount:      updated.SitesCount,
+		})
+	}
+
 	if err := h.contentRepo.Create(c.Context(), content); err != nil {
 		return c.Status(500).JSON(ErrorResponse{Error: "failed to create content"})
+	}
+
+	if err := h.userContentRepo.Link(c.Context(), userOID, content.ID); err != nil {
+		return c.Status(500).JSON(ErrorResponse{Error: "failed to link content"})
 	}
 
 	go h.refreshViolationsForContent(content)
@@ -190,7 +213,27 @@ func (h *ContentHandler) List(c *fiber.Ctx) error {
 		Offset:        offset,
 	}
 
-	contents, total, err := h.contentRepo.FindByUserAccess(c.Context(), userID, isAdmin, filter)
+	var contents []repo.Content
+	var total int64
+	var err error
+
+	if isAdmin {
+		contents, total, err = h.contentRepo.FindAll(c.Context(), filter)
+	} else {
+		userOID, parseErr := primitive.ObjectIDFromHex(userID)
+		if parseErr != nil {
+			return c.Status(500).JSON(ErrorResponse{Error: "invalid user id"})
+		}
+		contentIDs, listErr := h.userContentRepo.GetContentIDs(c.Context(), userOID)
+		if listErr != nil {
+			return c.Status(500).JSON(ErrorResponse{Error: "failed to fetch user content"})
+		}
+		if len(contentIDs) == 0 {
+			return c.JSON(ListContentResponse{Items: []ContentWithStats{}, Total: 0})
+		}
+		contents, total, err = h.contentRepo.FindByIDs(c.Context(), contentIDs, filter)
+	}
+
 	if err != nil {
 		return c.Status(500).JSON(ErrorResponse{Error: "failed to fetch content"})
 	}
@@ -210,6 +253,18 @@ func (h *ContentHandler) List(c *fiber.Ctx) error {
 	})
 }
 
+func (h *ContentHandler) hasAccess(ctx context.Context, userID string, isAdmin bool, contentID primitive.ObjectID) bool {
+	if isAdmin {
+		return true
+	}
+	userOID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return false
+	}
+	hasAccess, _ := h.userContentRepo.HasAccess(ctx, userOID, contentID)
+	return hasAccess
+}
+
 func (h *ContentHandler) checkContentAccess(c *fiber.Ctx, contentID string) (*repo.Content, error) {
 	userID := middleware.GetUserID(c)
 	isAdmin := middleware.IsAdmin(c)
@@ -222,11 +277,7 @@ func (h *ContentHandler) checkContentAccess(c *fiber.Ctx, contentID string) (*re
 		return nil, c.Status(404).JSON(ErrorResponse{Error: "content not found"})
 	}
 
-	hasAccess, err := h.contentRepo.HasUserAccess(c.Context(), contentID, userID, isAdmin)
-	if err != nil {
-		return nil, c.Status(500).JSON(ErrorResponse{Error: "failed to check access"})
-	}
-	if !hasAccess {
+	if !h.hasAccess(c.Context(), userID, isAdmin, content.ID) {
 		return nil, c.Status(403).JSON(ErrorResponse{Error: "access denied"})
 	}
 
@@ -258,7 +309,6 @@ func (h *ContentHandler) Get(c *fiber.Ctx) error {
 	})
 }
 
-// ViolationResponse - нарушение для API
 type ViolationResponse struct {
 	PageID    string `json:"page_id"`
 	SiteID    string `json:"site_id"`
@@ -397,9 +447,283 @@ func (h *ContentHandler) ExportViolationsCSV(c *fiber.Ctx) error {
 	return c.Send(buf.Bytes())
 }
 
+// ExportViolationsText godoc
+// @Summary Export violations to text report
+// @Description Export all violations for content to plain text file
+// @Tags content
+// @Produce text/plain
+// @Param id path string true "Content ID"
+// @Success 200 {file} file
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/content/{id}/violations/export-text [get]
+func (h *ContentHandler) ExportViolationsText(c *fiber.Ctx) error {
+	id := c.Params("id")
+
+	content, err := h.checkContentAccess(c, id)
+	if err != nil {
+		return err
+	}
+
+	vList, err := h.violationsSvc.GetAllByContentID(c.Context(), id)
+	if err != nil {
+		return c.Status(500).JSON(ErrorResponse{Error: "failed to fetch violations"})
+	}
+
+	domainMap := h.getSiteDomainsMap(c.Context(), vList)
+
+	var buf bytes.Buffer
+
+	buf.WriteString(fmt.Sprintf("Отчёт о нарушениях: %s", content.Title))
+	if content.Year > 0 {
+		buf.WriteString(fmt.Sprintf(" (%d)", content.Year))
+	}
+	buf.WriteString("\n")
+	buf.WriteString(fmt.Sprintf("Всего нарушений: %d\n", len(vList)))
+	buf.WriteString("\n")
+
+	domainViolations := make(map[string][]violations.Violation)
+	for _, v := range vList {
+		domain := domainMap[v.SiteID]
+		domainViolations[domain] = append(domainViolations[domain], v)
+	}
+
+	for domain, viols := range domainViolations {
+		buf.WriteString(fmt.Sprintf("=== %s (%d) ===\n", domain, len(viols)))
+		for _, v := range viols {
+			buf.WriteString(fmt.Sprintf("  %s\n", v.PageURL))
+		}
+		buf.WriteString("\n")
+	}
+
+	filename := fmt.Sprintf("violations_%s.txt", content.Title)
+	c.Set("Content-Type", "text/plain; charset=utf-8")
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+
+	return c.Send(buf.Bytes())
+}
+
+// ExportCSV godoc
+// @Summary Export content list to CSV
+// @Description Export all content matching filters to CSV file
+// @Tags content
+// @Produce text/csv
+// @Param title query string false "Search by title"
+// @Param kinopoisk_id query string false "Filter by Kinopoisk ID"
+// @Param imdb_id query string false "Filter by IMDB ID"
+// @Param mal_id query string false "Filter by MAL ID"
+// @Param shikimori_id query string false "Filter by Shikimori ID"
+// @Param mydramalist_id query string false "Filter by MyDramaList ID"
+// @Param has_violations query string false "Filter by violations presence (true/false)"
+// @Param sort_by query string false "Sort by field" Enums(violations_count, created_at) default(violations_count)
+// @Param sort_order query string false "Sort order" Enums(asc, desc) default(desc)
+// @Success 200 {file} file
+// @Router /api/content/export [get]
+func (h *ContentHandler) ExportCSV(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	isAdmin := middleware.IsAdmin(c)
+
+	title := c.Query("title")
+	kinopoiskID := c.Query("kinopoisk_id")
+	imdbID := c.Query("imdb_id")
+	malID := c.Query("mal_id")
+	shikimoriID := c.Query("shikimori_id")
+	mydramalistID := c.Query("mydramalist_id")
+	hasViolationsStr := c.Query("has_violations")
+	sortBy := c.Query("sort_by", "violations_count")
+	sortOrder := c.Query("sort_order", "desc")
+
+	var hasViolations *bool
+	if hasViolationsStr == "true" {
+		v := true
+		hasViolations = &v
+	} else if hasViolationsStr == "false" {
+		v := false
+		hasViolations = &v
+	}
+
+	filter := repo.ContentFilter{
+		Title:         title,
+		KinopoiskID:   kinopoiskID,
+		IMDBID:        imdbID,
+		MALID:         malID,
+		ShikimoriID:   shikimoriID,
+		MyDramaListID: mydramalistID,
+		HasViolations: hasViolations,
+		SortBy:        sortBy,
+		SortOrder:     sortOrder,
+		Limit:         10000,
+		Offset:        0,
+	}
+
+	var contents []repo.Content
+	var err error
+
+	if isAdmin {
+		contents, _, err = h.contentRepo.FindAll(c.Context(), filter)
+	} else {
+		userOID, parseErr := primitive.ObjectIDFromHex(userID)
+		if parseErr != nil {
+			return c.Status(500).JSON(ErrorResponse{Error: "invalid user id"})
+		}
+		contentIDs, listErr := h.userContentRepo.GetContentIDs(c.Context(), userOID)
+		if listErr != nil {
+			return c.Status(500).JSON(ErrorResponse{Error: "failed to fetch user content"})
+		}
+		if len(contentIDs) == 0 {
+			contents = []repo.Content{}
+		} else {
+			contents, _, err = h.contentRepo.FindByIDs(c.Context(), contentIDs, filter)
+		}
+	}
+
+	if err != nil {
+		return c.Status(500).JSON(ErrorResponse{Error: "failed to fetch content"})
+	}
+
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
+
+	buf.Write([]byte{0xEF, 0xBB, 0xBF})
+
+	writer.Write([]string{"Название", "Оригинальное название", "Год выхода", "КиноПоиск ID", "IMDb ID", "MDL ID", "MAL ID", "Shikimori ID", "Нарушений", "Сайтов", "Добавлен"})
+
+	for _, content := range contents {
+		createdAt := ""
+		if !content.CreatedAt.IsZero() {
+			createdAt = content.CreatedAt.Format("2006-01-02 15:04:05")
+		}
+		writer.Write([]string{
+			content.Title,
+			content.OriginalTitle,
+			strconv.Itoa(content.Year),
+			content.KinopoiskID,
+			content.IMDBID,
+			content.MyDramaListID,
+			content.MALID,
+			content.ShikimoriID,
+			strconv.FormatInt(content.ViolationsCount, 10),
+			strconv.FormatInt(content.SitesCount, 10),
+			createdAt,
+		})
+	}
+
+	writer.Flush()
+
+	c.Set("Content-Type", "text/csv; charset=utf-8")
+	c.Set("Content-Disposition", "attachment; filename=\"content.csv\"")
+
+	return c.Send(buf.Bytes())
+}
+
+// ExportAllViolationsText godoc
+// @Summary Export all violations to text report
+// @Description Export violations for all content matching filters to plain text file
+// @Tags content
+// @Produce text/plain
+// @Param title query string false "Search by title"
+// @Param kinopoisk_id query string false "Filter by Kinopoisk ID"
+// @Param imdb_id query string false "Filter by IMDB ID"
+// @Param mal_id query string false "Filter by MAL ID"
+// @Param shikimori_id query string false "Filter by Shikimori ID"
+// @Param mydramalist_id query string false "Filter by MyDramaList ID"
+// @Success 200 {file} file
+// @Router /api/content/violations/export-text [get]
+func (h *ContentHandler) ExportAllViolationsText(c *fiber.Ctx) error {
+	userID := middleware.GetUserID(c)
+	isAdmin := middleware.IsAdmin(c)
+
+	title := c.Query("title")
+	kinopoiskID := c.Query("kinopoisk_id")
+	imdbID := c.Query("imdb_id")
+	malID := c.Query("mal_id")
+	shikimoriID := c.Query("shikimori_id")
+	mydramalistID := c.Query("mydramalist_id")
+
+	hasViolations := true
+	filter := repo.ContentFilter{
+		Title:         title,
+		KinopoiskID:   kinopoiskID,
+		IMDBID:        imdbID,
+		MALID:         malID,
+		ShikimoriID:   shikimoriID,
+		MyDramaListID: mydramalistID,
+		HasViolations: &hasViolations,
+		SortBy:        "violations_count",
+		SortOrder:     "desc",
+		Limit:         10000,
+		Offset:        0,
+	}
+
+	var contents []repo.Content
+	var err error
+
+	if isAdmin {
+		contents, _, err = h.contentRepo.FindAll(c.Context(), filter)
+	} else {
+		userOID, parseErr := primitive.ObjectIDFromHex(userID)
+		if parseErr != nil {
+			return c.Status(500).JSON(ErrorResponse{Error: "invalid user id"})
+		}
+		contentIDs, listErr := h.userContentRepo.GetContentIDs(c.Context(), userOID)
+		if listErr != nil {
+			return c.Status(500).JSON(ErrorResponse{Error: "failed to fetch user content"})
+		}
+		if len(contentIDs) == 0 {
+			contents = []repo.Content{}
+		} else {
+			contents, _, err = h.contentRepo.FindByIDs(c.Context(), contentIDs, filter)
+		}
+	}
+
+	if err != nil {
+		return c.Status(500).JSON(ErrorResponse{Error: "failed to fetch content"})
+	}
+
+	var buf bytes.Buffer
+	totalViolations := 0
+
+	for _, content := range contents {
+		vList, err := h.violationsSvc.GetAllByContentID(c.Context(), content.ID.Hex())
+		if err != nil || len(vList) == 0 {
+			continue
+		}
+
+		domainMap := h.getSiteDomainsMap(c.Context(), vList)
+
+		buf.WriteString(fmt.Sprintf("=== %s", content.Title))
+		if content.Year > 0 {
+			buf.WriteString(fmt.Sprintf(" (%d)", content.Year))
+		}
+		buf.WriteString(fmt.Sprintf(" [%d] ===\n", len(vList)))
+
+		domainViolations := make(map[string][]violations.Violation)
+		for _, v := range vList {
+			domain := domainMap[v.SiteID]
+			domainViolations[domain] = append(domainViolations[domain], v)
+		}
+
+		for domain, viols := range domainViolations {
+			buf.WriteString(fmt.Sprintf("  %s (%d):\n", domain, len(viols)))
+			for _, v := range viols {
+				buf.WriteString(fmt.Sprintf("    %s\n", v.PageURL))
+			}
+		}
+		buf.WriteString("\n")
+		totalViolations += len(vList)
+	}
+
+	header := fmt.Sprintf("Отчёт о нарушениях\nВсего контента: %d\nВсего нарушений: %d\n\n", len(contents), totalViolations)
+
+	c.Set("Content-Type", "text/plain; charset=utf-8")
+	c.Set("Content-Disposition", "attachment; filename=\"violations_report.txt\"")
+
+	return c.Send(append([]byte(header), buf.Bytes()...))
+}
+
 // Delete godoc
 // @Summary Delete content
-// @Description Remove content from tracking
+// @Description Remove content from tracking (unlinks from user, deletes if no other users)
 // @Tags content
 // @Param id path string true "Content ID"
 // @Success 204
@@ -408,13 +732,29 @@ func (h *ContentHandler) ExportViolationsCSV(c *fiber.Ctx) error {
 // @Router /api/content/{id} [delete]
 func (h *ContentHandler) Delete(c *fiber.Ctx) error {
 	id := c.Params("id")
+	userID := middleware.GetUserID(c)
+	isAdmin := middleware.IsAdmin(c)
 
-	_, err := h.checkContentAccess(c, id)
+	content, err := h.checkContentAccess(c, id)
 	if err != nil {
 		return err
 	}
 
+	userOID, _ := primitive.ObjectIDFromHex(userID)
+
+	if !isAdmin {
+		if err := h.userContentRepo.Unlink(c.Context(), userOID, content.ID); err != nil {
+			return c.Status(500).JSON(ErrorResponse{Error: "failed to unlink content"})
+		}
+
+		count, _ := h.userContentRepo.CountByContentID(c.Context(), content.ID)
+		if count > 0 {
+			return c.SendStatus(204)
+		}
+	}
+
 	h.violationsSvc.DeleteByContentID(c.Context(), id)
+	h.userContentRepo.DeleteByContentID(c.Context(), content.ID)
 
 	if err := h.contentRepo.Delete(c.Context(), id); err != nil {
 		return c.Status(500).JSON(ErrorResponse{Error: "failed to delete content"})
@@ -437,13 +777,14 @@ type CreateContentBatchRequest struct {
 
 type CreateContentBatchResponse struct {
 	Created    int      `json:"created"`
+	Linked     int      `json:"linked"`
 	Failed     int      `json:"failed"`
 	ContentIDs []string `json:"content_ids"`
 }
 
 // CreateBatch godoc
 // @Summary Create multiple content items
-// @Description Add multiple content items to track for violations in a single batch request
+// @Description Add multiple content items to track. If content already exists, links it to user.
 // @Tags content
 // @Accept json
 // @Produce json
@@ -453,7 +794,6 @@ type CreateContentBatchResponse struct {
 // @Router /api/content/batch [post]
 func (h *ContentHandler) CreateBatch(c *fiber.Ctx) error {
 	userID := middleware.GetUserID(c)
-	isAdmin := middleware.IsAdmin(c)
 
 	var req CreateContentBatchRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -464,16 +804,12 @@ func (h *ContentHandler) CreateBatch(c *fiber.Ctx) error {
 		return c.Status(400).JSON(ErrorResponse{Error: "items array is required"})
 	}
 
-	var ownerOID primitive.ObjectID
-	if !isAdmin && userID != "" {
-		var err error
-		ownerOID, err = primitive.ObjectIDFromHex(userID)
-		if err != nil {
-			return c.Status(500).JSON(ErrorResponse{Error: "invalid user id"})
-		}
+	userOID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return c.Status(500).JSON(ErrorResponse{Error: "invalid user id"})
 	}
 
-	var created, failed int
+	var created, linked, failed int
 	var contentIDs []string
 
 	for _, item := range req.Items {
@@ -487,7 +823,6 @@ func (h *ContentHandler) CreateBatch(c *fiber.Ctx) error {
 		}
 
 		content := &repo.Content{
-			OwnerID:       ownerOID,
 			Title:         item.Title,
 			OriginalTitle: item.OriginalTitle,
 			Year:          item.Year,
@@ -498,7 +833,25 @@ func (h *ContentHandler) CreateBatch(c *fiber.Ctx) error {
 			MyDramaListID: item.MyDramaListID,
 		}
 
+		existing, _ := h.contentRepo.FindByExternalID(c.Context(), content)
+		if existing != nil {
+			h.contentRepo.EnrichExternalIDs(c.Context(), existing.ID, content)
+
+			if err := h.userContentRepo.Link(c.Context(), userOID, existing.ID); err == nil {
+				linked++
+				contentIDs = append(contentIDs, existing.ID.Hex())
+			} else {
+				failed++
+			}
+			continue
+		}
+
 		if err := h.contentRepo.Create(c.Context(), content); err != nil {
+			failed++
+			continue
+		}
+
+		if err := h.userContentRepo.Link(c.Context(), userOID, content.ID); err != nil {
 			failed++
 			continue
 		}
@@ -511,6 +864,7 @@ func (h *ContentHandler) CreateBatch(c *fiber.Ctx) error {
 
 	return c.Status(201).JSON(CreateContentBatchResponse{
 		Created:    created,
+		Linked:     linked,
 		Failed:     failed,
 		ContentIDs: contentIDs,
 	})
@@ -549,8 +903,12 @@ func (h *ContentHandler) CheckViolations(c *fiber.Ctx) error {
 
 	var checked int64
 	for _, id := range req.ContentIDs {
-		hasAccess, _ := h.contentRepo.HasUserAccess(c.Context(), id, userID, isAdmin)
-		if !hasAccess {
+		contentOID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
+			continue
+		}
+
+		if !h.hasAccess(c.Context(), userID, isAdmin, contentOID) {
 			continue
 		}
 
@@ -601,14 +959,30 @@ func (h *ContentHandler) DeleteBulk(c *fiber.Ctx) error {
 		return c.Status(400).JSON(ErrorResponse{Error: "content_ids is required"})
 	}
 
+	userOID, _ := primitive.ObjectIDFromHex(userID)
+
 	var deleted int64
 	for _, id := range req.ContentIDs {
-		hasAccess, _ := h.contentRepo.HasUserAccess(c.Context(), id, userID, isAdmin)
-		if !hasAccess {
+		contentOID, err := primitive.ObjectIDFromHex(id)
+		if err != nil {
 			continue
 		}
 
+		if !h.hasAccess(c.Context(), userID, isAdmin, contentOID) {
+			continue
+		}
+
+		if !isAdmin {
+			h.userContentRepo.Unlink(c.Context(), userOID, contentOID)
+			count, _ := h.userContentRepo.CountByContentID(c.Context(), contentOID)
+			if count > 0 {
+				deleted++
+				continue
+			}
+		}
+
 		h.violationsSvc.DeleteByContentID(c.Context(), id)
+		h.userContentRepo.DeleteByContentID(c.Context(), contentOID)
 		if err := h.contentRepo.Delete(c.Context(), id); err == nil {
 			deleted++
 		}

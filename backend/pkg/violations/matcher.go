@@ -20,9 +20,27 @@ var stopWords = map[string]bool{
 	"episode": true, "series": true, "movie": true, "film": true,
 	"мобильных": true, "устройствах": true, "ios": true, "android": true,
 	"windows": true, "phone": true, "смотрите": true,
+	// Предлоги и служебные слова
+	"в": true, "на": true, "без": true, "с": true,
+	"in": true, "on": true, "the": true, "a": true, "an": true,
+}
+
+var commonTitleWords = map[string]bool{
+	"год": true, "время": true, "мир": true, "дом": true,
+	"свет": true, "день": true, "ночь": true, "жизнь": true,
+	"путь": true, "игра": true, "love": true, "life": true,
+	"time": true, "home": true, "world": true, "light": true,
+	"game": true, "war": true, "day": true, "night": true,
+	"любовь": true, "война": true, "друзья": true, "семья": true,
 }
 
 var yearRegex = regexp.MustCompile(`\b(19[5-9]\d|20[0-2]\d)\b`)
+
+var (
+	malURLRegex       = regexp.MustCompile(`myanimelist\.net/anime/(\d+)`)
+	shikimoriURLRegex = regexp.MustCompile(`shikimori\.(one|me|org)/animes/[a-z]*(\d+)`)
+	mdlURLRegex       = regexp.MustCompile(`mydramalist\.com/(\d+)`)
+)
 
 type Matcher struct {
 	meili *meili.Client
@@ -132,7 +150,7 @@ func (m *Matcher) findAllMatchesWithSiteFilter(ctx context.Context, content Cont
 		}
 		addMatches(matches, MatchByTitleYear)
 
-		if content.OriginalTitle != "" {
+		if isValidTitle(content.OriginalTitle) {
 			matches, err = m.searchByTitleAndYearWithSite(content.OriginalTitle, content.Year, siteFilter, 10000)
 			if err != nil {
 				return nil, err
@@ -142,7 +160,9 @@ func (m *Matcher) findAllMatchesWithSiteFilter(ctx context.Context, content Cont
 	}
 
 	// Stage 7: title only (exact phrase)
-	if content.Title != "" {
+	// Для однословных названий пропускаем - слишком много ложных срабатываний
+	// Используем только kinopoisk_id/imdb_id/title+year для них
+	if isValidTitle(content.Title) && !isSingleWordTitle(content.Title) {
 		matches, err := m.searchExactPhrase(content.Title, siteFilter, 10000)
 		if err != nil {
 			return nil, err
@@ -150,7 +170,7 @@ func (m *Matcher) findAllMatchesWithSiteFilter(ctx context.Context, content Cont
 		addMatches(matches, MatchByTitle)
 	}
 
-	if content.OriginalTitle != "" {
+	if isValidTitle(content.OriginalTitle) && !isSingleWordTitle(content.OriginalTitle) {
 		matches, err := m.searchExactPhrase(content.OriginalTitle, siteFilter, 10000)
 		if err != nil {
 			return nil, err
@@ -159,14 +179,14 @@ func (m *Matcher) findAllMatchesWithSiteFilter(ctx context.Context, content Cont
 	}
 
 	// Stage 8: fuzzy title + год в тексте (title/description)
-	if content.Year > 0 && content.Title != "" {
+	if content.Year > 0 && isValidTitle(content.Title) {
 		matches, err := m.searchFuzzyWithYearInText(content.Title, content.Year, siteFilter, 10000)
 		if err != nil {
 			return nil, err
 		}
 		addMatches(matches, MatchByTitleFuzzyYear)
 
-		if content.OriginalTitle != "" {
+		if isValidTitle(content.OriginalTitle) {
 			matches, err = m.searchFuzzyWithYearInText(content.OriginalTitle, content.Year, siteFilter, 10000)
 			if err != nil {
 				return nil, err
@@ -239,7 +259,7 @@ func (m *Matcher) findMatchesWithSiteFilter(ctx context.Context, content Content
 	}
 
 	// Priority 6: title + year
-	if content.Year > 0 && content.Title != "" {
+	if content.Year > 0 && isValidTitle(content.Title) {
 		matches, err := m.searchByTitleAndYearWithSiteAndType(content.Title, content.Year, siteFilter, MatchByTitleYear, 10000)
 		if err != nil {
 			return nil, "", err
@@ -248,7 +268,7 @@ func (m *Matcher) findMatchesWithSiteFilter(ctx context.Context, content Content
 			return matches, MatchByTitleYear, nil
 		}
 
-		if content.OriginalTitle != "" {
+		if isValidTitle(content.OriginalTitle) {
 			matches, err = m.searchByTitleAndYearWithSiteAndType(content.OriginalTitle, content.Year, siteFilter, MatchByTitleYear, 10000)
 			if err != nil {
 				return nil, "", err
@@ -260,7 +280,8 @@ func (m *Matcher) findMatchesWithSiteFilter(ctx context.Context, content Content
 	}
 
 	// Priority 7: title only (exact phrase)
-	if content.Title != "" {
+	// Пропускаем для однословных названий - слишком много ложных срабатываний
+	if isValidTitle(content.Title) && !isSingleWordTitle(content.Title) {
 		matches, err := m.searchExactPhraseWithType(content.Title, siteFilter, MatchByTitle, 10000)
 		if err != nil {
 			return nil, "", err
@@ -270,7 +291,7 @@ func (m *Matcher) findMatchesWithSiteFilter(ctx context.Context, content Content
 		}
 	}
 
-	if content.OriginalTitle != "" {
+	if isValidTitle(content.OriginalTitle) && !isSingleWordTitle(content.OriginalTitle) {
 		matches, err := m.searchExactPhraseWithType(content.OriginalTitle, siteFilter, MatchByTitle, 10000)
 		if err != nil {
 			return nil, "", err
@@ -281,7 +302,7 @@ func (m *Matcher) findMatchesWithSiteFilter(ctx context.Context, content Content
 	}
 
 	// Priority 8: fuzzy title + год в тексте (title/description)
-	if content.Year > 0 && content.Title != "" {
+	if content.Year > 0 && isValidTitle(content.Title) {
 		matches, err := m.searchFuzzyWithYearInText(content.Title, content.Year, siteFilter, 10000)
 		if err != nil {
 			return nil, "", err
@@ -290,7 +311,7 @@ func (m *Matcher) findMatchesWithSiteFilter(ctx context.Context, content Content
 			return matches, MatchByTitleFuzzyYear, nil
 		}
 
-		if content.OriginalTitle != "" {
+		if isValidTitle(content.OriginalTitle) {
 			matches, err = m.searchFuzzyWithYearInText(content.OriginalTitle, content.Year, siteFilter, 10000)
 			if err != nil {
 				return nil, "", err
@@ -321,7 +342,19 @@ func (m *Matcher) searchByFilterWithType(filter string, matchType MatchType, lim
 }
 
 func (m *Matcher) searchByIDInLinksText(id, siteFilter string, matchType MatchType, limit int64) ([]PageMatch, error) {
-	if len(id) < 3 {
+	if len(id) < 2 {
+		return nil, nil
+	}
+
+	var regex *regexp.Regexp
+	switch matchType {
+	case MatchByMAL:
+		regex = malURLRegex
+	case MatchByShikimori:
+		regex = shikimoriURLRegex
+	case MatchByMyDramaList:
+		regex = mdlURLRegex
+	default:
 		return nil, nil
 	}
 
@@ -332,13 +365,23 @@ func (m *Matcher) searchByIDInLinksText(id, siteFilter string, matchType MatchTy
 
 	var matches []PageMatch
 	for _, hit := range result.Hits {
-		if strings.Contains(hit.LinksText, id) {
+		if containsIDInURL(hit.LinksText, id, regex) {
 			match := hitToMatch(hit)
 			match.MatchType = matchType
 			matches = append(matches, match)
 		}
 	}
 	return matches, nil
+}
+
+func containsIDInURL(linksText, id string, regex *regexp.Regexp) bool {
+	matches := regex.FindAllStringSubmatch(linksText, -1)
+	for _, m := range matches {
+		if len(m) > 0 && m[len(m)-1] == id {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Matcher) searchByTitleAndYear(title string, year int, limit int64) ([]PageMatch, error) {
@@ -404,19 +447,143 @@ func (m *Matcher) searchExactPhraseWithType(phrase, extraFilter string, matchTyp
 // filterHitsByPhrase отфильтровывает результаты, оставляя только те где фраза
 // действительно присутствует в title (case-insensitive).
 // Description не проверяется - там слишком много мусора и false positives.
+// Для коротких названий используется строгая проверка:
+// - название должно начинать заголовок
+// - после названия могут быть только стоп-слова (смотреть, онлайн и т.д.) или год
+// - это отсекает "Между нами горы" при поиске "Между нами"
 func filterHitsByPhrase(hits []meili.PageDocument, phrase string) []meili.PageDocument {
 	phraseNorm := normalizeTitle(phrase)
 	if phraseNorm == "" {
 		return nil
 	}
+
+	shortPhrase := isShortPhrase(phrase)
+
 	var filtered []meili.PageDocument
 	for _, hit := range hits {
 		titleNorm := normalizeTitle(hit.Title)
-		if strings.Contains(titleNorm, phraseNorm) {
-			filtered = append(filtered, hit)
+		if shortPhrase {
+			// Для коротких названий требуем:
+			// 1. Название начинает заголовок
+			// 2. После названия идут только стоп-слова или ничего
+			// "Между нами горы" ≠ "Между нами" (горы - не стоп-слово)
+			// "Между нами смотреть онлайн" = "Между нами" (всё стоп-слова)
+			if titleStartsWithPhraseAndOnlyStopWordsFollow(titleNorm, phraseNorm) {
+				filtered = append(filtered, hit)
+			}
+		} else {
+			// Для длинных названий - обычный substring match
+			if strings.Contains(titleNorm, phraseNorm) {
+				filtered = append(filtered, hit)
+			}
 		}
 	}
 	return filtered
+}
+
+func isShortOrCommonTitle(title string) bool {
+	titleLower := strings.ToLower(strings.TrimSpace(title))
+	runes := []rune(titleLower)
+	if len(runes) <= 5 {
+		return true
+	}
+	return commonTitleWords[titleLower]
+}
+
+func isShortPhrase(phrase string) bool {
+	phrase = strings.TrimSpace(phrase)
+	runes := []rune(phrase)
+	// Короткая фраза: <=12 символов
+	// "Из ада" (6 символов) - short
+	// "Властелин колец" (15 символов) - NOT short
+	return len(runes) <= 12
+}
+
+func titleStartsWithPhrase(title, phrase string) bool {
+	// Проверяем что title начинается с phrase
+	if !strings.HasPrefix(title, phrase) {
+		return false
+	}
+	// Проверяем word boundary после phrase
+	if len(title) == len(phrase) {
+		return true // точное совпадение
+	}
+	nextChar := title[len(phrase)]
+	// Следующий символ должен быть разделителем
+	return nextChar == ' ' || nextChar == ':' || nextChar == '/' ||
+		nextChar == '.' || nextChar == ',' || nextChar == '-' ||
+		nextChar == '(' || nextChar == ')' || nextChar == '!'
+}
+
+// titleStartsWithPhraseAndOnlyStopWordsFollow проверяет что:
+// 1. title начинается с phrase
+// 2. После phrase идут только стоп-слова (смотреть, онлайн, бесплатно и т.д.)
+// Это отсекает "Между нами горы" при поиске "Между нами" (горы - не стоп-слово)
+// Но пропускает "Между нами смотреть онлайн" (всё после - стоп-слова)
+func titleStartsWithPhraseAndOnlyStopWordsFollow(title, phrase string) bool {
+	if !strings.HasPrefix(title, phrase) {
+		return false
+	}
+	if len(title) == len(phrase) {
+		return true // точное совпадение
+	}
+
+	// Получаем остаток после фразы
+	rest := title[len(phrase):]
+
+	// Убираем разделители в начале
+	rest = strings.TrimLeft(rest, " :/-.,()!?")
+	if rest == "" {
+		return true
+	}
+
+	// Все оставшиеся слова должны быть стоп-словами или числами
+	words := strings.Fields(rest)
+	for _, word := range words {
+		word = strings.Trim(word, ".,!?:;\"'()-«»")
+		word = strings.ToLower(word)
+		if word == "" {
+			continue
+		}
+		// Числа ОК (года, сезоны, разрешение)
+		if _, err := strconv.Atoi(word); err == nil {
+			continue
+		}
+		// Если слово не стоп-слово - это другой фильм/контент
+		if !stopWords[word] {
+			return false
+		}
+	}
+	return true
+}
+
+func isSingleWordTitle(title string) bool {
+	title = strings.TrimSpace(title)
+	words := strings.Fields(title)
+	return len(words) == 1
+}
+
+func isSingleWordShortTitle(title string) bool {
+	return isSingleWordTitle(title) && isShortOrCommonTitle(title)
+}
+
+func containsWholeWord(text, word string) bool {
+	words := strings.Fields(text)
+	for _, w := range words {
+		if w == word {
+			return true
+		}
+	}
+	return false
+}
+
+func titleStartsWithWord(text, word string) bool {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return false
+	}
+	firstWord := strings.Trim(words[0], ".,!?:;\"'()-«»")
+	return firstWord == word
 }
 
 // normalizeTitle очищает title для сравнения:
@@ -438,6 +605,22 @@ func normalizeTitle(s string) string {
 	// Убираем лишние пробелы
 	s = strings.Join(strings.Fields(s), " ")
 	return s
+}
+
+// isValidTitle проверяет что название не является мусорным значением
+func isValidTitle(title string) bool {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return false
+	}
+	// Мусорные значения: "-", "--", "...", "N/A", "n/a", "TBA" и т.д.
+	invalidTitles := map[string]bool{
+		"-": true, "--": true, "---": true,
+		"...": true, "..": true, ".": true,
+		"n/a": true, "na": true, "tba": true, "tbd": true,
+		"unknown": true, "untitled": true, "none": true,
+	}
+	return !invalidTitles[strings.ToLower(title)]
 }
 
 var yearInParensRegex = regexp.MustCompile(`\s*\((19[5-9]\d|20[0-2]\d)\)\s*`)

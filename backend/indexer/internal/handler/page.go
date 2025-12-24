@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/csv"
 	"strconv"
 	"time"
 
@@ -160,4 +162,99 @@ func (h *PageHandler) Stats(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(stats)
+}
+
+// ExportCSV godoc
+// @Summary Export pages to CSV
+// @Description Export all pages matching filters to CSV file
+// @Tags pages
+// @Produce text/csv
+// @Param site_id query string false "Filter by site ID"
+// @Param year query int false "Filter by year"
+// @Param has_player query bool false "Filter by player presence"
+// @Param has_violations query bool false "Filter by violations presence"
+// @Param sort_by query string false "Sort by field" Enums(indexed_at, year) default(indexed_at)
+// @Param sort_order query string false "Sort order" Enums(asc, desc) default(desc)
+// @Success 200 {file} file
+// @Router /api/pages/export [get]
+func (h *PageHandler) ExportCSV(c *fiber.Ctx) error {
+	siteID := c.Query("site_id")
+	year, _ := strconv.Atoi(c.Query("year"))
+
+	query := repo.PageQuery{
+		SiteID:    siteID,
+		Year:      year,
+		SortBy:    c.Query("sort_by", "indexed_at"),
+		SortOrder: c.Query("sort_order", "desc"),
+		Limit:     100000,
+		Offset:    0,
+	}
+
+	if hp := c.Query("has_player"); hp == "true" || hp == "false" {
+		hasPlayer := hp == "true"
+		query.HasPlayer = &hasPlayer
+	}
+
+	if hv := c.Query("has_violations"); (hv == "true" || hv == "false") && siteID != "" && h.violationsSvc != nil {
+		pageIDs, err := h.violationsSvc.GetPageIDsBySiteID(c.Context(), siteID)
+		if err != nil {
+			pageIDs = []string{}
+		}
+		if hv == "true" {
+			if len(pageIDs) > 0 {
+				query.PageIDs = pageIDs
+			} else {
+				var buf bytes.Buffer
+				buf.Write([]byte{0xEF, 0xBB, 0xBF})
+				c.Set("Content-Type", "text/csv; charset=utf-8")
+				c.Set("Content-Disposition", "attachment; filename=\"pages.csv\"")
+				return c.Send(buf.Bytes())
+			}
+		} else {
+			query.ExcludePageIDs = pageIDs
+		}
+	}
+
+	pages, _, err := h.pageRepo.Search(c.Context(), query)
+	if err != nil {
+		return c.Status(500).JSON(ErrorResponse{Error: "failed to fetch pages"})
+	}
+
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
+
+	buf.Write([]byte{0xEF, 0xBB, 0xBF})
+
+	writer.Write([]string{"URL", "Название", "Год", "КиноПоиск ID", "IMDb ID", "MAL ID", "Shikimori ID", "MDL ID", "Плеер", "HTTP", "Проиндексирован"})
+
+	for _, p := range pages {
+		hasPlayer := ""
+		if p.PlayerURL != "" {
+			hasPlayer = "да"
+		}
+		indexedAt := ""
+		if !p.IndexedAt.IsZero() {
+			indexedAt = p.IndexedAt.Format("2006-01-02 15:04:05")
+		}
+		writer.Write([]string{
+			p.URL,
+			p.Title,
+			strconv.Itoa(p.Year),
+			p.ExternalIDs.KinopoiskID,
+			p.ExternalIDs.IMDBID,
+			p.ExternalIDs.MALID,
+			p.ExternalIDs.ShikimoriID,
+			p.ExternalIDs.MyDramaListID,
+			hasPlayer,
+			strconv.Itoa(p.HTTPStatus),
+			indexedAt,
+		})
+	}
+
+	writer.Flush()
+
+	c.Set("Content-Type", "text/csv; charset=utf-8")
+	c.Set("Content-Disposition", "attachment; filename=\"pages.csv\"")
+
+	return c.Send(buf.Bytes())
 }

@@ -1,11 +1,12 @@
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { sitesApi, pagesApi, tasksApi, sitemapUrlsApi } from '@/lib/api'
+import { sitesApi, pagesApi, tasksApi, sitemapUrlsApi, downloadFile } from '@/lib/api'
 import type { Page, SiteStatus, TaskStatus, PagesQueryParams, SitemapURL, SitemapURLStatus } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { CopyButton } from '@/components/ui/copy-button'
 import { TruncatedText } from '@/components/ui/truncated-text'
+import { Pagination } from '@/components/ui/pagination'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Table,
@@ -18,6 +19,10 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Progress } from '@/components/ui/progress'
 import { Input } from '@/components/ui/input'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { ChevronDown, Filter, Download } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { useState } from 'react'
 
 function formatDate(dateString: string | undefined): string {
@@ -140,13 +145,20 @@ function formatFreezeReason(reason: string | undefined): string {
 
 export function SiteDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const [pagesOffset, setPagesOffset] = useState(0)
+  const [pagesPage, setPagesPage] = useState(1)
+  const [pagesLimit, setPagesLimit] = useState(20)
   const [filters, setFilters] = useState<PageFilters>(defaultFilters)
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [sitemapPage, setSitemapPage] = useState(1)
+  const [sitemapLimit, setSitemapLimit] = useState(50)
   const [sitemapStatusFilter, setSitemapStatusFilter] = useState<SitemapURLStatus | ''>('')
-  const pagesLimit = 20
-  const sitemapLimit = 50
   const queryClient = useQueryClient()
+
+  const activeFiltersCount = [
+    filters.year,
+    filters.hasPlayer,
+    filters.hasViolations,
+  ].filter(Boolean).length
 
   const scanMutation = useMutation({
     mutationFn: () => sitesApi.scan({ site_ids: [id!] }),
@@ -191,7 +203,7 @@ export function SiteDetailPage() {
 
   const pagesQueryParams: PagesQueryParams = {
     site_id: id,
-    offset: pagesOffset,
+    offset: (pagesPage - 1) * pagesLimit,
     limit: pagesLimit,
     sort_by: filters.sortBy,
     sort_order: filters.sortOrder,
@@ -256,8 +268,7 @@ export function SiteDetailPage() {
   const isScanning = task?.status === 'pending' || task?.status === 'processing'
   const pages = pagesQuery.data?.items ?? []
   const pagesTotal = pagesQuery.data?.total ?? 0
-  const currentPage = Math.floor(pagesOffset / pagesLimit) + 1
-  const totalPages = Math.ceil(pagesTotal / pagesLimit)
+  const pagesTotalPages = Math.ceil(pagesTotal / pagesLimit)
 
   const sitemapUrls = sitemapUrlsQuery.data?.urls ?? []
   const sitemapTotal = sitemapUrlsQuery.data?.total ?? 0
@@ -507,73 +518,111 @@ export function SiteDetailPage() {
         </TabsList>
 
         <TabsContent value="pages" className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <h2 className="text-xl font-semibold">Страницы</h2>
-              <span className="text-sm text-muted-foreground">{pagesTotal}</span>
-              {site.violations_count > 0 && (
-                <Badge variant="destructive">{site.violations_count} нарушений</Badge>
-              )}
+          <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <h2 className="text-xl font-semibold">Страницы</h2>
+                <span className="text-sm text-muted-foreground">{pagesTotal}</span>
+                {site.violations_count > 0 && (
+                  <Badge variant="destructive">{site.violations_count} нарушений</Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <CollapsibleTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Filter className="h-4 w-4 mr-1" />
+                    Фильтры
+                    {activeFiltersCount > 0 && (
+                      <Badge variant="secondary" className="ml-1">{activeFiltersCount}</Badge>
+                    )}
+                    <ChevronDown className={cn("h-4 w-4 ml-1 transition-transform", filtersOpen && "rotate-180")} />
+                  </Button>
+                </CollapsibleTrigger>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => downloadFile(pagesApi.exportUrl({
+                        site_id: id,
+                        year: filters.year ? parseInt(filters.year, 10) : undefined,
+                        has_player: filters.hasPlayer === 'true' ? true : filters.hasPlayer === 'false' ? false : undefined,
+                        has_violations: filters.hasViolations === 'true' ? true : filters.hasViolations === 'false' ? false : undefined,
+                        sort_by: filters.sortBy,
+                        sort_order: filters.sortOrder,
+                      }), 'pages.csv')}
+                      disabled={pagesTotal === 0}
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Скачать CSV</TooltipContent>
+                </Tooltip>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Input
-                type="number"
-                placeholder="Год"
-                value={filters.year}
-                onChange={(e) => {
-                  setFilters({ ...filters, year: e.target.value })
-                  setPagesOffset(0)
-                }}
-                className="w-20 h-9"
-              />
-              <select
-                className={filterSelectClass(filters.hasPlayer !== '')}
-                value={filters.hasPlayer}
-                onChange={(e) => {
-                  setFilters({ ...filters, hasPlayer: e.target.value as BooleanFilter })
-                  setPagesOffset(0)
-                }}
-              >
-                <option value="">Плеер</option>
-                <option value="true">С плеером</option>
-                <option value="false">Без плеера</option>
-              </select>
-              <select
-                className={filterSelectClass(filters.hasViolations !== '')}
-                value={filters.hasViolations}
-                onChange={(e) => {
-                  setFilters({ ...filters, hasViolations: e.target.value as BooleanFilter })
-                  setPagesOffset(0)
-                }}
-              >
-                <option value="">Нарушения</option>
-                <option value="true">С нарушениями</option>
-                <option value="false">Без нарушений</option>
-              </select>
-              <select
-                className="h-9 rounded-md border bg-background px-3 text-sm"
-                value={filters.sortBy}
-                onChange={(e) => {
-                  setFilters({ ...filters, sortBy: e.target.value as 'indexed_at' | 'year' })
-                  setPagesOffset(0)
-                }}
-              >
-                <option value="indexed_at">По дате</option>
-                <option value="year">По году</option>
-              </select>
-              <select
-                className="h-9 rounded-md border bg-background px-3 text-sm"
-                value={filters.sortOrder}
-                onChange={(e) => {
-                  setFilters({ ...filters, sortOrder: e.target.value as 'asc' | 'desc' })
-                  setPagesOffset(0)
-                }}
-              >
-                <option value="desc">По убыв.</option>
-                <option value="asc">По возр.</option>
-              </select>
-            </div>
-          </div>
+            <CollapsibleContent>
+              <div className="mt-4 p-4 border rounded-lg bg-muted/30">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Input
+                    type="number"
+                    placeholder="Год"
+                    value={filters.year}
+                    onChange={(e) => {
+                      setFilters({ ...filters, year: e.target.value })
+                      setPagesPage(1)
+                    }}
+                    className="w-20 h-9"
+                  />
+                  <select
+                    className={filterSelectClass(filters.hasPlayer !== '')}
+                    value={filters.hasPlayer}
+                    onChange={(e) => {
+                      setFilters({ ...filters, hasPlayer: e.target.value as BooleanFilter })
+                      setPagesPage(1)
+                    }}
+                  >
+                    <option value="">Плеер</option>
+                    <option value="true">С плеером</option>
+                    <option value="false">Без плеера</option>
+                  </select>
+                  <select
+                    className={filterSelectClass(filters.hasViolations !== '')}
+                    value={filters.hasViolations}
+                    onChange={(e) => {
+                      setFilters({ ...filters, hasViolations: e.target.value as BooleanFilter })
+                      setPagesPage(1)
+                    }}
+                  >
+                    <option value="">Нарушения</option>
+                    <option value="true">С нарушениями</option>
+                    <option value="false">Без нарушений</option>
+                  </select>
+                  <select
+                    className="h-9 rounded-md border bg-background px-3 text-sm"
+                    value={filters.sortBy}
+                    onChange={(e) => {
+                      setFilters({ ...filters, sortBy: e.target.value as 'indexed_at' | 'year' })
+                      setPagesPage(1)
+                    }}
+                  >
+                    <option value="indexed_at">По дате</option>
+                    <option value="year">По году</option>
+                  </select>
+                  <select
+                    className="h-9 rounded-md border bg-background px-3 text-sm"
+                    value={filters.sortOrder}
+                    onChange={(e) => {
+                      setFilters({ ...filters, sortOrder: e.target.value as 'asc' | 'desc' })
+                      setPagesPage(1)
+                    }}
+                  >
+                    <option value="desc">По убыв.</option>
+                    <option value="asc">По возр.</option>
+                  </select>
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
 
           {pagesQuery.isLoading && (
             <p className="text-muted-foreground">Загрузка страниц...</p>
@@ -658,28 +707,18 @@ export function SiteDetailPage() {
                 </TableBody>
               </Table>
 
-              {totalPages > 1 && (
-                <div className="flex items-center justify-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={currentPage === 1}
-                    onClick={() => setPagesOffset(pagesOffset - pagesLimit)}
-                  >
-                    Назад
-                  </Button>
-                  <span className="text-sm text-muted-foreground">
-                    Страница {currentPage} из {totalPages}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={currentPage === totalPages}
-                    onClick={() => setPagesOffset(pagesOffset + pagesLimit)}
-                  >
-                    Вперёд
-                  </Button>
-                </div>
+              {pagesTotal > 0 && (
+                <Pagination
+                  currentPage={pagesPage}
+                  totalPages={pagesTotalPages}
+                  pageSize={pagesLimit}
+                  total={pagesTotal}
+                  onPageChange={setPagesPage}
+                  onPageSizeChange={(size) => {
+                    setPagesLimit(size)
+                    setPagesPage(1)
+                  }}
+                />
               )}
             </>
           )}
@@ -772,28 +811,18 @@ export function SiteDetailPage() {
                 </TableBody>
               </Table>
 
-              {sitemapTotalPages > 1 && (
-                <div className="flex items-center justify-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={sitemapPage === 1}
-                    onClick={() => setSitemapPage(sitemapPage - 1)}
-                  >
-                    Назад
-                  </Button>
-                  <span className="text-sm text-muted-foreground">
-                    Страница {sitemapPage} из {sitemapTotalPages}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={sitemapPage === sitemapTotalPages}
-                    onClick={() => setSitemapPage(sitemapPage + 1)}
-                  >
-                    Вперёд
-                  </Button>
-                </div>
+              {sitemapTotal > 0 && (
+                <Pagination
+                  currentPage={sitemapPage}
+                  totalPages={sitemapTotalPages}
+                  pageSize={sitemapLimit}
+                  total={sitemapTotal}
+                  onPageChange={setSitemapPage}
+                  onPageSizeChange={(size) => {
+                    setSitemapLimit(size)
+                    setSitemapPage(1)
+                  }}
+                />
               )}
             </>
           )}

@@ -38,9 +38,11 @@ func New(siteRepo *repo.SiteRepo, taskRepo *repo.ScanTaskRepo, contentRepo *repo
 }
 
 const (
-	pendingDetectionTimeout  = 5 * time.Minute
-	staleTaskPendingTimeout  = 30 * time.Minute
+	pendingDetectionTimeout    = 5 * time.Minute
+	staleTaskPendingTimeout    = 30 * time.Minute
 	staleTaskProcessingTimeout = 2 * time.Hour
+	maxTaskRetries             = 3
+	baseRetryDelay             = 5 * time.Minute
 )
 
 func (s *Scheduler) Start(ctx context.Context) error {
@@ -77,6 +79,16 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	}
 
 	_, err = s.scheduler.NewJob(
+		gocron.DurationJob(2*time.Minute),
+		gocron.NewTask(func() {
+			s.retryFailedTasks(ctx)
+		}),
+	)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.scheduler.NewJob(
 		gocron.DurationJob(24*time.Hour),
 		gocron.NewTask(func() {
 			s.refreshAllViolations(ctx)
@@ -91,6 +103,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 
 	go s.queueDueSites(ctx)
 	go s.recoverPendingSites(ctx)
+	go s.retryFailedTasks(ctx)
 
 	return nil
 }
@@ -212,7 +225,11 @@ func (s *Scheduler) recoverStaleTasks(ctx context.Context) {
 			errMsg = "task stuck in processing state (possible worker crash or DLQ)"
 		}
 
-		if err := s.taskRepo.MarkFailed(ctx, task.ID.Hex(), errMsg); err != nil {
+		// Calculate next retry time with exponential backoff
+		retryDelay := baseRetryDelay * time.Duration(1<<task.RetryCount) // 5m, 10m, 20m, 40m...
+		nextRetryAt := time.Now().Add(retryDelay)
+
+		if err := s.taskRepo.MarkFailedWithRetry(ctx, task.ID.Hex(), errMsg, &nextRetryAt); err != nil {
 			log.Warn().Err(err).Str("task", task.ID.Hex()).Msg("failed to mark stale task as failed")
 			continue
 		}
@@ -221,7 +238,9 @@ func (s *Scheduler) recoverStaleTasks(ctx context.Context) {
 			Str("task", task.ID.Hex()).
 			Str("site", task.Domain).
 			Str("status", string(task.Status)).
-			Msg("stale task marked as failed")
+			Int("retry_count", task.RetryCount).
+			Time("next_retry_at", nextRetryAt).
+			Msg("stale task marked as failed, scheduled for retry")
 	}
 }
 
@@ -265,5 +284,76 @@ func (s *Scheduler) refreshAllViolations(ctx context.Context) {
 
 	if updated > 0 {
 		log.Info().Int64("count", updated).Msg("violations refreshed")
+	}
+}
+
+func (s *Scheduler) retryFailedTasks(ctx context.Context) {
+	log := logger.Log
+
+	failedTasks, err := s.taskRepo.FindFailedTasksForRetry(ctx, maxTaskRetries)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to find failed tasks for retry")
+		return
+	}
+
+	if len(failedTasks) == 0 {
+		return
+	}
+
+	log.Info().Int("count", len(failedTasks)).Msg("found failed tasks to retry")
+
+	for _, task := range failedTasks {
+		// Check if max retries exceeded - freeze the site
+		if task.RetryCount >= maxTaskRetries {
+			reason := "max scan retries exceeded"
+			if err := s.siteRepo.MarkFrozen(ctx, task.SiteID, reason); err != nil {
+				log.Warn().Err(err).Str("site", task.Domain).Msg("failed to freeze site after max retries")
+			} else {
+				log.Warn().
+					Str("site", task.Domain).
+					Int("retries", task.RetryCount).
+					Msg("site frozen after max retries")
+			}
+			continue
+		}
+
+		// Reset task to processing and increment retry count
+		if err := s.taskRepo.IncrementRetryAndReset(ctx, task.ID.Hex()); err != nil {
+			log.Warn().Err(err).Str("task", task.ID.Hex()).Msg("failed to reset task for retry")
+			continue
+		}
+
+		// Get site for publishing task
+		site, err := s.siteRepo.FindByID(ctx, task.SiteID)
+		if err != nil {
+			log.Warn().Err(err).Str("site", task.SiteID).Msg("failed to get site for retry")
+			continue
+		}
+
+		taskInfo := indexerQueue.TaskInfo{
+			TaskID:       task.ID.Hex(),
+			Site:         site,
+			AutoContinue: true,
+		}
+
+		// Publish to the appropriate queue based on current stage
+		var publishErr error
+		if task.Stage == status.StageSitemap {
+			publishErr = s.publisher.PublishSitemapCrawlTask(ctx, taskInfo)
+		} else {
+			publishErr = s.publisher.PublishPageCrawlTaskSimple(ctx, taskInfo)
+		}
+
+		if publishErr != nil {
+			log.Warn().Err(publishErr).Str("task", task.ID.Hex()).Msg("failed to republish task")
+			continue
+		}
+
+		log.Info().
+			Str("task", task.ID.Hex()).
+			Str("site", task.Domain).
+			Str("stage", string(task.Stage)).
+			Int("retry", task.RetryCount+1).
+			Msg("failed task retried")
 	}
 }
