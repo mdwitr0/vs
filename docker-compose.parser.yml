@@ -1,3 +1,6 @@
+# Remote parser for va-indexer-1, va-indexer-2
+# Connects to indexer and NATS on va-prod (146.19.213.178)
+# Uses Lightpanda as headless browser (11x faster, 9x less memory than Chrome)
 services:
   parser:
     build:
@@ -5,27 +8,33 @@ services:
       dockerfile: parser/Dockerfile
     container_name: va-parser
     restart: always
+    depends_on:
+      - lightpanda
     environment:
-      NATS_URL: ${NATS_URL}
-      MONGO_URL: ${MONGO_URL}
-      MONGO_DB: ${MONGO_DB}
-      MEILI_URL: ${MEILI_URL}
-      MEILI_KEY: ${MEILI_KEY}
-      WORKER_COUNT: ${WORKER_COUNT:-10}
+      NATS_URL: nats://146.19.213.178:4222
+      INDEXER_API_URL: http://146.19.213.178:8080
+      WORKER_COUNT: ${WORKER_COUNT:-5}
       MAX_BROWSER_TABS: ${MAX_BROWSER_TABS:-10}
       HTTP_PORT: "8082"
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
-      REDIS_URL: ${REDIS_URL}
-      HTML_CACHE_TTL: ${HTML_CACHE_TTL:-24h}
-      PAGE_LOAD_DELAY: ${PAGE_LOAD_DELAY:-0.1s}
-      CRAWL_RATE_LIMIT: ${CRAWL_RATE_LIMIT:-0s}
-    volumes:
-      - browser_profiles:/data/browser-profiles
-    shm_size: 2gb
+      PAGE_LOAD_DELAY: ${PAGE_LOAD_DELAY:-0s}
+      BROWSER_CDP_URL: ws://lightpanda:9222
     deploy:
       resources:
         limits:
-          memory: 4G
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 256M
 
-volumes:
-  browser_profiles:
+  lightpanda:
+    image: lightpanda/browser:nightly
+    container_name: va-lightpanda
+    restart: always
+    environment:
+      LIGHTPANDA_DISABLE_TELEMETRY: "true"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'

@@ -1,10 +1,11 @@
 .PHONY: up down build rebuild logs reset seed swagger \
         infra backend frontend indexer parser \
-        dev dev-backend dev-frontend clean help
+        dev dev-backend dev-frontend clean help \
+        deploy-prod deploy-parser deploy-home
 
 # === MAIN COMMANDS ===
 
-up: ## Start all services
+up: ## Start all services (local dev)
 	docker compose up -d
 
 down: ## Stop all services
@@ -14,7 +15,7 @@ build: ## Build all images
 	docker compose build
 
 rebuild: ## Rebuild and restart app services (keeps infra running)
-	docker --context home-server compose up -d --force-recreate indexer parser frontend
+	docker compose up -d --build --force-recreate indexer parser frontend
 
 logs: ## Show logs (use: make logs s=indexer)
 	@if [ -n "$(s)" ]; then \
@@ -23,10 +24,57 @@ logs: ## Show logs (use: make logs s=indexer)
 		docker compose logs -f; \
 	fi
 
+# === DEPLOY ===
+
+deploy-prod: ## Deploy to va-prod (full stack)
+	docker --context va-prod compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+	docker --context va-prod restart va-prod-nginx
+
+deploy-prod-quick: ## Deploy to va-prod without rebuild
+	docker --context va-prod compose -f docker-compose.prod.yml --env-file .env.prod up -d
+	docker --context va-prod restart va-prod-nginx
+
+deploy-parser-1: ## Deploy parser to va-indexer-1
+	docker --context va-indexer-1 compose -f docker-compose.parser.yml --env-file .env.parser up -d --build
+
+deploy-parser-2: ## Deploy parser to va-indexer-2
+	docker --context va-indexer-2 compose -f docker-compose.parser.yml --env-file .env.parser up -d --build
+
+deploy-parsers: deploy-parser-1 deploy-parser-2 ## Deploy parsers to all indexer nodes
+
+deploy-home: ## Deploy to home-server (dev)
+	docker --context home-server compose up -d --build
+
+deploy-all: deploy-prod deploy-parsers ## Deploy everything (prod + all parsers)
+
+# === LOGS (remote) ===
+
+logs-prod: ## Show va-prod logs (use: make logs-prod s=indexer)
+	@if [ -n "$(s)" ]; then \
+		docker --context va-prod compose -f docker-compose.prod.yml logs -f $(s); \
+	else \
+		docker --context va-prod compose -f docker-compose.prod.yml logs -f; \
+	fi
+
+logs-parser-1: ## Show va-indexer-1 parser logs
+	docker --context va-indexer-1 compose -f docker-compose.parser.yml logs -f parser
+
+logs-parser-2: ## Show va-indexer-2 parser logs
+	docker --context va-indexer-2 compose -f docker-compose.parser.yml logs -f parser
+
+# === STATUS ===
+
+status-prod: ## Show va-prod container status
+	docker --context va-prod compose -f docker-compose.prod.yml ps
+
+status-parsers: ## Show all parser nodes status
+	@echo "=== va-indexer-1 ===" && docker --context va-indexer-1 compose -f docker-compose.parser.yml ps
+	@echo "=== va-indexer-2 ===" && docker --context va-indexer-2 compose -f docker-compose.parser.yml ps
+
 # === INFRASTRUCTURE ===
 
 infra: ## Start only infrastructure (mongodb, redis, meilisearch)
-	docker compose up -d mongodb redis meilisearch
+	docker compose up -d mongodb redis meilisearch nats
 
 # === DEV MODE (local services + docker infra) ===
 

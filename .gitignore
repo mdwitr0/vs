@@ -1,5 +1,6 @@
 .env
 .env.prod
+.env.parser
 .env.local
 .claude
 nginx/ssl/

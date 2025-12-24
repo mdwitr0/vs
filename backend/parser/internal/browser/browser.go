@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,7 +12,6 @@ import (
 	"github.com/video-analitics/backend/pkg/captcha"
 	cdpopts "github.com/video-analitics/backend/pkg/chromedp"
 	"github.com/video-analitics/backend/pkg/logger"
-	"github.com/video-analitics/parser/internal/cache"
 )
 
 const profileDir = "/data/browser-profile"
@@ -30,12 +30,13 @@ type GlobalBrowser struct {
 	solver        *captcha.PirateSolver
 	semaphore     chan struct{} // limits concurrent tabs
 	pageLoadDelay time.Duration
-	htmlCache     *cache.HTMLCache
+	isRemote      bool // true if using remote browser (Lightpanda)
 }
 
 // Init initializes the global browser singleton
 // Must be called once at application startup
-func Init(ctx context.Context, solver *captcha.PirateSolver, pageLoadDelay time.Duration, htmlCache *cache.HTMLCache, maxTabs int) error {
+// Set BROWSER_CDP_URL env to use remote browser (e.g., Lightpanda: ws://lightpanda:9222)
+func Init(ctx context.Context, solver *captcha.PirateSolver, pageLoadDelay time.Duration, maxTabs int) error {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -47,15 +48,43 @@ func Init(ctx context.Context, solver *captcha.PirateSolver, pageLoadDelay time.
 		maxTabs = 10
 	}
 
-	if err := os.MkdirAll(profileDir, 0755); err != nil {
-		return fmt.Errorf("create profile dir: %w", err)
+	cdpURL := os.Getenv("BROWSER_CDP_URL")
+
+	var allocCtx context.Context
+	var allocCancel context.CancelFunc
+	var isRemote bool
+
+	if cdpURL != "" {
+		// Remote browser (Lightpanda or remote Chrome)
+		// NoModifyURL prevents chromedp from fetching /json/version and using the returned URL
+		// This is needed for Lightpanda which returns ws://0.0.0.0:9222/ in /json/version
+		allocCtx, allocCancel = chromedp.NewRemoteAllocator(ctx, cdpURL, chromedp.NoModifyURL)
+		isRemote = true
+		logger.Log.Info().Str("cdp_url", cdpURL).Msg("using remote browser")
+	} else {
+		// Local Chrome
+		if err := os.MkdirAll(profileDir, 0755); err != nil {
+			return fmt.Errorf("create profile dir: %w", err)
+		}
+
+		opts := cdpopts.GetExecAllocatorOptions()
+		opts = append(opts, chromedp.UserDataDir(profileDir))
+
+		allocCtx, allocCancel = chromedp.NewExecAllocator(ctx, opts...)
+		logger.Log.Info().Str("profile", profileDir).Msg("using local Chrome")
 	}
 
-	opts := cdpopts.GetExecAllocatorOptions()
-	opts = append(opts, chromedp.UserDataDir(profileDir))
+	// Custom error logger that filters out known harmless errors
+	errorLogger := func(format string, args ...interface{}) {
+		msg := fmt.Sprintf(format, args...)
+		// Ignore cookiePartitionKey unmarshal errors (Chrome CDP API change)
+		if strings.Contains(msg, "cookiePartitionKey") {
+			return
+		}
+		logger.Log.Error().Msg(msg)
+	}
 
-	allocCtx, allocCancel := chromedp.NewExecAllocator(ctx, opts...)
-	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
+	browserCtx, browserCancel := chromedp.NewContext(allocCtx, chromedp.WithErrorf(errorLogger))
 
 	if err := chromedp.Run(browserCtx); err != nil {
 		allocCancel()
@@ -70,10 +99,10 @@ func Init(ctx context.Context, solver *captcha.PirateSolver, pageLoadDelay time.
 		solver:        solver,
 		semaphore:     make(chan struct{}, maxTabs),
 		pageLoadDelay: pageLoadDelay,
-		htmlCache:     htmlCache,
+		isRemote:      isRemote,
 	}
 
-	logger.Log.Info().Str("profile", profileDir).Int("max_tabs", maxTabs).Dur("page_load_delay", pageLoadDelay).Msg("global browser initialized")
+	logger.Log.Info().Int("max_tabs", maxTabs).Dur("page_load_delay", pageLoadDelay).Bool("remote", isRemote).Msg("global browser initialized")
 	return nil
 }
 

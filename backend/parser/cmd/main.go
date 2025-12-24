@@ -9,13 +9,10 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/video-analitics/backend/pkg/captcha"
 	"github.com/video-analitics/backend/pkg/logger"
-	"github.com/video-analitics/backend/pkg/meili"
 	"github.com/video-analitics/backend/pkg/nats"
 	"github.com/video-analitics/parser/internal/api"
 	"github.com/video-analitics/parser/internal/browser"
-	"github.com/video-analitics/parser/internal/cache"
 	"github.com/video-analitics/parser/internal/config"
-	"github.com/video-analitics/parser/internal/repo"
 	"github.com/video-analitics/parser/internal/worker"
 )
 
@@ -30,33 +27,9 @@ func main() {
 	}
 	defer natsClient.Close()
 
-	pageRepo, err := repo.NewPageRepo(cfg.MongoURL, cfg.MongoDB)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to connect to MongoDB")
-	}
-	defer pageRepo.Close()
-
-	meiliClient, err := meili.New(cfg.MeiliURL, cfg.MeiliKey)
-	if err != nil {
-		log.Fatal().Err(err).Str("url", cfg.MeiliURL).Msg("failed to connect to Meilisearch")
-	}
-	log.Info().Str("url", cfg.MeiliURL).Msg("meilisearch connected")
-
-	// Initialize HTML cache (optional - if Redis is available)
-	var htmlCache *cache.HTMLCache
-	if cfg.RedisURL != "" {
-		htmlCache, err = cache.NewHTMLCache(cfg.RedisURL, cfg.HTMLCacheTTL)
-		if err != nil {
-			log.Warn().Err(err).Str("url", cfg.RedisURL).Msg("failed to connect to Redis, HTML cache disabled")
-		} else {
-			defer htmlCache.Close()
-			log.Info().Str("url", cfg.RedisURL).Dur("ttl", cfg.HTMLCacheTTL).Msg("html cache enabled")
-		}
-	}
-
 	// Initialize global browser
 	solver := captcha.NewPirateSolver()
-	if err := browser.Init(context.Background(), solver, cfg.PageLoadDelay, htmlCache, cfg.MaxBrowserTabs); err != nil {
+	if err := browser.Init(context.Background(), solver, cfg.PageLoadDelay, cfg.MaxBrowserTabs); err != nil {
 		log.Fatal().Err(err).Msg("failed to initialize browser")
 	}
 	defer browser.Close()
@@ -76,7 +49,7 @@ func main() {
 		}
 	}()
 
-	crawlWorker := worker.New(natsClient, pageRepo, meiliClient, cfg.CrawlRateLimit)
+	crawlWorker := worker.New(natsClient)
 	detectWorker := worker.NewDetectWorker(natsClient)
 	sitemapWorker := worker.NewSitemapWorker(natsClient)
 	pageWorker := worker.NewPageWorker(natsClient, cfg.InternalAPIToken)
@@ -94,7 +67,6 @@ func main() {
 
 	log.Info().
 		Str("nats", cfg.NatsURL).
-		Str("mongo", cfg.MongoURL).
 		Int("workers", cfg.WorkerCount).
 		Msg("parser started")
 

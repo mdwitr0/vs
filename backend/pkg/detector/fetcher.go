@@ -2,15 +2,15 @@ package detector
 
 import (
 	"context"
-	"crypto/tls"
-	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/imroc/req/v3"
 )
 
 type Fetcher struct {
-	client    *http.Client
+	client    *req.Client
 	userAgent string
 	cookies   []*http.Cookie
 }
@@ -19,13 +19,14 @@ type FetcherOption func(*Fetcher)
 
 func WithTimeout(timeout time.Duration) FetcherOption {
 	return func(f *Fetcher) {
-		f.client.Timeout = timeout
+		f.client.SetTimeout(timeout)
 	}
 }
 
 func WithUserAgent(ua string) FetcherOption {
 	return func(f *Fetcher) {
 		f.userAgent = ua
+		f.client.SetUserAgent(ua)
 	}
 }
 
@@ -58,25 +59,14 @@ func WithCookies(cookies []CookieData) FetcherOption {
 }
 
 func NewFetcher(opts ...FetcherOption) *Fetcher {
+	client := req.C().
+		ImpersonateChrome().
+		SetTimeout(30 * time.Second).
+		SetRedirectPolicy(req.MaxRedirectPolicy(10))
+
 	f := &Fetcher{
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true,
-				},
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
-			},
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 10 {
-					return http.ErrUseLastResponse
-				}
-				return nil
-			},
-		},
-		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		client:    client,
+		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
 	}
 
 	for _, opt := range opts {
@@ -89,42 +79,42 @@ func NewFetcher(opts ...FetcherOption) *Fetcher {
 func (f *Fetcher) Fetch(ctx context.Context, url string) *FetchResult {
 	result := &FetchResult{URL: url}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		result.Error = err
-		return result
-	}
-
-	req.Header.Set("User-Agent", f.userAgent)
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7")
+	request := f.client.R().
+		SetContext(ctx).
+		SetHeaders(map[string]string{
+			"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+			"Accept-Language":           "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+			"sec-ch-ua":                 `"Chromium";v="131", "Google Chrome";v="131", "Not_A Brand";v="24"`,
+			"sec-ch-ua-mobile":          "?0",
+			"sec-ch-ua-platform":        `"Windows"`,
+			"sec-fetch-dest":            "document",
+			"sec-fetch-mode":            "navigate",
+			"sec-fetch-site":            "none",
+			"sec-fetch-user":            "?1",
+			"Upgrade-Insecure-Requests": "1",
+			"DNT":                       "1",
+		})
 
 	for _, cookie := range f.cookies {
-		req.AddCookie(cookie)
+		request.SetCookies(cookie)
 	}
 
-	resp, err := f.client.Do(req)
+	resp, err := request.Get(url)
 	if err != nil {
 		result.Error = err
 		return result
 	}
-	defer resp.Body.Close()
 
 	result.StatusCode = resp.StatusCode
 	result.FinalURL = resp.Request.URL.String()
-	result.ContentType = resp.Header.Get("Content-Type")
+	result.ContentType = resp.GetContentType()
 
 	result.Headers = make(map[string]string)
 	for key := range resp.Header {
 		result.Headers[strings.ToLower(key)] = resp.Header.Get(key)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
-	if err != nil {
-		result.Error = err
-		return result
-	}
-	result.Body = body
+	result.Body = resp.Bytes()
 
 	return result
 }
@@ -132,24 +122,17 @@ func (f *Fetcher) Fetch(ctx context.Context, url string) *FetchResult {
 func (f *Fetcher) Head(ctx context.Context, url string) *FetchResult {
 	result := &FetchResult{URL: url}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	resp, err := f.client.R().
+		SetContext(ctx).
+		Head(url)
 	if err != nil {
 		result.Error = err
 		return result
 	}
-
-	req.Header.Set("User-Agent", f.userAgent)
-
-	resp, err := f.client.Do(req)
-	if err != nil {
-		result.Error = err
-		return result
-	}
-	defer resp.Body.Close()
 
 	result.StatusCode = resp.StatusCode
 	result.FinalURL = resp.Request.URL.String()
-	result.ContentType = resp.Header.Get("Content-Type")
+	result.ContentType = resp.GetContentType()
 
 	result.Headers = make(map[string]string)
 	for key := range resp.Header {

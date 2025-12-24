@@ -7,10 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/video-analitics/backend/pkg/captcha"
+	"github.com/video-analitics/backend/pkg/detector"
 	"github.com/video-analitics/backend/pkg/logger"
 	"github.com/video-analitics/backend/pkg/models"
 	"github.com/video-analitics/backend/pkg/nats"
@@ -26,15 +29,28 @@ type PageWorker struct {
 	publisher     *nats.Publisher
 	extractor     *extractor.Extractor
 	httpClient    *http.Client
+	httpFetcher   *detector.Fetcher
 	internalToken string
+	indexerAPIURL string
+
+	siteCookies   map[string][]captcha.Cookie
+	siteStrategy  map[string]string
+	cookiesMu     sync.RWMutex
 }
 
+const (
+	strategyHTTPFirst   = "http_first"
+	strategyBrowserOnly = "browser_only"
+)
+
 func NewPageWorker(natsClient *nats.Client, internalToken string) *PageWorker {
+	indexerAPIURL := os.Getenv("INDEXER_API_URL")
 	return &PageWorker{
 		natsClient:    natsClient,
 		publisher:     nats.NewPublisher(natsClient),
 		extractor:     extractor.New(),
 		internalToken: internalToken,
+		indexerAPIURL: indexerAPIURL,
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 			Transport: &http.Transport{
@@ -43,6 +59,9 @@ func NewPageWorker(natsClient *nats.Client, internalToken string) *PageWorker {
 				IdleConnTimeout:     90 * time.Second,
 			},
 		},
+		httpFetcher:  detector.NewFetcher(detector.WithTimeout(30 * time.Second)),
+		siteCookies:  make(map[string][]captcha.Cookie),
+		siteStrategy: make(map[string]string),
 	}
 }
 
@@ -60,8 +79,8 @@ func (w *PageWorker) RunPool(ctx context.Context, workerCount int) error {
 	consumer, err := nats.NewConsumer(w.natsClient, nats.ConsumerConfig{
 		Stream:        nats.StreamPageCrawlTasks,
 		Consumer:      "page-worker",
-		MaxAckPending: workerCount,
-		AckWait:       30 * time.Minute,
+		MaxAckPending: 100, // Shared across all parser instances
+		AckWait:       5 * time.Minute,
 	})
 	if err != nil {
 		return fmt.Errorf("create consumer: %w", err)
@@ -139,6 +158,12 @@ func (w *PageWorker) processPages(task *queue.PageCrawlTask, result *queue.PageC
 	log := logger.Log
 	bgCtx := context.Background()
 
+	// Use local INDEXER_API_URL if set, otherwise use task's URL
+	apiURL := task.IndexerAPIURL
+	if w.indexerAPIURL != "" {
+		apiURL = w.indexerAPIURL
+	}
+
 	if len(cookies) > 0 {
 		if err := browser.Get().SetCookies(cookies); err != nil {
 			log.Warn().Err(err).Msg("failed to set cookies")
@@ -147,7 +172,7 @@ func (w *PageWorker) processPages(task *queue.PageCrawlTask, result *queue.PageC
 
 	// Initialize Bloom filter with existing URLs to avoid duplicates
 	bloomFilter := cache.NewURLBloomFilter(1_000_000, 0.001)
-	existingURLs, err := w.fetchAllURLs(bgCtx, task.IndexerAPIURL, task.SiteID)
+	existingURLs, err := w.fetchAllURLs(bgCtx, apiURL, task.SiteID)
 	if err != nil {
 		log.Warn().Err(err).Msg("failed to fetch existing URLs for bloom filter")
 	} else {
@@ -158,7 +183,7 @@ func (w *PageWorker) processPages(task *queue.PageCrawlTask, result *queue.PageC
 	log.Info().Str("domain", task.Domain).Msg("starting page processing")
 
 	for {
-		fetchResult, err := w.fetchPendingURLs(bgCtx, task.IndexerAPIURL, task.SiteID, batchSize)
+		fetchResult, err := w.fetchPendingURLs(bgCtx, apiURL, task.SiteID, batchSize)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to fetch pending urls")
 			result.Success = false
@@ -344,7 +369,8 @@ func (w *PageWorker) parsePageSPAWithHTML(pageURL, siteID string, newCookies *[]
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	fetchResult, err := browser.Get().FetchPage(ctx, pageURL)
+	// Use hybrid fetch: HTTP first, then browser if needed
+	fetchResult, err := w.fetchPageHybrid(ctx, pageURL, siteID, newCookies)
 	if err != nil {
 		log.Warn().Err(err).Str("url", pageURL).Msg("page fetch failed")
 		result.Error = err.Error()
@@ -582,3 +608,137 @@ func (w *PageWorker) isInternalLink(link, domain string) bool {
 	// Точное совпадение или субдомен (go.kinogo1.biz → kinogo1.biz)
 	return linkHost == ourDomain || strings.HasSuffix(linkHost, "."+ourDomain)
 }
+
+// getSiteStrategy returns the current parsing strategy for a site
+func (w *PageWorker) getSiteStrategy(siteID string) string {
+	w.cookiesMu.RLock()
+	defer w.cookiesMu.RUnlock()
+	if s, ok := w.siteStrategy[siteID]; ok {
+		return s
+	}
+	return strategyHTTPFirst
+}
+
+// setSiteStrategy sets the parsing strategy for a site
+func (w *PageWorker) setSiteStrategy(siteID, strategy string) {
+	w.cookiesMu.Lock()
+	defer w.cookiesMu.Unlock()
+	w.siteStrategy[siteID] = strategy
+}
+
+// getSiteCookies returns stored cookies for a site
+func (w *PageWorker) getSiteCookies(siteID string) []captcha.Cookie {
+	w.cookiesMu.RLock()
+	defer w.cookiesMu.RUnlock()
+	return w.siteCookies[siteID]
+}
+
+// setSiteCookies stores cookies for a site
+func (w *PageWorker) setSiteCookies(siteID string, cookies []captcha.Cookie) {
+	if len(cookies) == 0 {
+		return
+	}
+	w.cookiesMu.Lock()
+	defer w.cookiesMu.Unlock()
+	w.siteCookies[siteID] = cookies
+}
+
+// convertCookiesToDetector converts captcha.Cookie to detector.CookieData
+func (w *PageWorker) convertCookiesToDetector(cookies []captcha.Cookie) []detector.CookieData {
+	result := make([]detector.CookieData, len(cookies))
+	for i, c := range cookies {
+		result[i] = detector.CookieData{
+			Name:     c.Name,
+			Value:    c.Value,
+			Domain:   c.Domain,
+			Path:     c.Path,
+			HTTPOnly: c.HTTPOnly,
+			Secure:   c.Secure,
+		}
+	}
+	return result
+}
+
+// fetchPageHybrid tries HTTP first, falls back to browser if blocked/captcha
+// TODO: HTTP fetcher disabled for now - using browser only
+func (w *PageWorker) fetchPageHybrid(ctx context.Context, pageURL, siteID string, newCookies *[]captcha.Cookie) (*browser.FetchResult, error) {
+	// Browser only mode
+	browserResult, err := browser.Get().FetchPage(ctx, pageURL)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store cookies if we got any
+	if len(browserResult.Cookies) > 0 {
+		w.setSiteCookies(siteID, browserResult.Cookies)
+		*newCookies = browserResult.Cookies
+	}
+
+	return browserResult, nil
+}
+
+/*
+// HTTP-first implementation (disabled)
+func (w *PageWorker) fetchPageHybridHTTP(ctx context.Context, pageURL, siteID string, newCookies *[]captcha.Cookie) (*browser.FetchResult, error) {
+	log := logger.Log
+
+	strategy := w.getSiteStrategy(siteID)
+
+	// If site is marked as browser-only, skip HTTP
+	if strategy == strategyBrowserOnly {
+		log.Debug().Str("url", pageURL).Str("site", siteID).Msg("using browser (strategy: browser_only)")
+		return browser.Get().FetchPage(ctx, pageURL)
+	}
+
+	// Try HTTP first
+	siteCookies := w.getSiteCookies(siteID)
+	fetcher := w.httpFetcher
+	if len(siteCookies) > 0 {
+		fetcher = detector.NewFetcher(
+			detector.WithTimeout(30*time.Second),
+			detector.WithCookies(w.convertCookiesToDetector(siteCookies)),
+		)
+	}
+
+	httpResult := fetcher.Fetch(ctx, pageURL)
+	if httpResult.Error != nil {
+		log.Debug().Err(httpResult.Error).Str("url", pageURL).Msg("HTTP fetch failed, falling back to browser")
+		return browser.Get().FetchPage(ctx, pageURL)
+	}
+
+	html := string(httpResult.Body)
+	blockResult := browser.DetectBlocking(html, httpResult.StatusCode)
+
+	// If not blocked, return HTTP result
+	if !blockResult.Blocked {
+		log.Debug().Str("url", pageURL).Int("status", httpResult.StatusCode).Int("html_len", len(html)).Msg("HTTP fetch success")
+		return &browser.FetchResult{
+			HTML:     html,
+			FinalURL: httpResult.FinalURL,
+		}, nil
+	}
+
+	// If blocked but not captcha, switch to browser-only strategy
+	if !blockResult.IsCaptcha {
+		log.Info().Str("url", pageURL).Str("reason", blockResult.Reason).Msg("HTTP blocked (not captcha), switching to browser-only")
+		w.setSiteStrategy(siteID, strategyBrowserOnly)
+		return browser.Get().FetchPage(ctx, pageURL)
+	}
+
+	// Captcha detected - use browser to solve it
+	log.Info().Str("url", pageURL).Msg("captcha detected in HTTP response, using browser to solve")
+	browserResult, err := browser.Get().FetchPage(ctx, pageURL)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store new cookies from browser
+	if len(browserResult.Cookies) > 0 {
+		w.setSiteCookies(siteID, browserResult.Cookies)
+		*newCookies = browserResult.Cookies
+		log.Info().Str("site", siteID).Int("cookies", len(browserResult.Cookies)).Msg("cookies saved from browser")
+	}
+
+	return browserResult, nil
+}
+*/

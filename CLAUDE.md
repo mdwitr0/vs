@@ -92,6 +92,36 @@ docker-compose logs -f indexer
 ```
 
 **ВАЖНО:** НЕ использовать `--no-cache` при сборке — билд зависает!
+
+### Deploy на прод
+
+**Прод сервер:** `146.19.213.178` (контекст `va-prod`)
+
+Используй команды из Makefile:
+
+```bash
+# Полный деплой (с пересборкой)
+make deploy-prod
+
+# Быстрый деплой (без пересборки)
+make deploy-prod-quick
+
+# Деплой парсеров на ноды
+make deploy-parser-1    # va-indexer-1
+make deploy-parser-2    # va-indexer-2
+make deploy-parsers     # все парсеры
+
+# Деплой всего
+make deploy-all
+
+# Логи прода
+make logs-prod          # все сервисы
+make logs-prod s=indexer
+
+# Статус
+make status-prod
+make status-parsers
+```
 ```bash
 # Правильно
 docker compose build indexer parser frontend

@@ -43,7 +43,7 @@ func NewCrawler(
 		siteRepo:     siteRepo,
 		pageRepo:     pageRepo,
 		settingsRepo: settingsRepo,
-		parser:       NewParser(client),
+		parser:       NewParser(client, cfg.ParserURL),
 		detector:     NewDetector(),
 		client:       client,
 		cfg:          cfg,

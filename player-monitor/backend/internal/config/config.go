@@ -22,6 +22,9 @@ type Config struct {
 	CrawlMaxDepth     int           // Maximum recursion depth for link crawling
 	CrawlRateLimit    time.Duration // Delay between requests
 	ScanIntervalHours int           // Default scan interval in hours for scheduler
+
+	// Parser service
+	ParserURL string // URL of browser-based parser service (e.g. http://192.168.2.2:8082)
 }
 
 func Load() *Config {
@@ -40,6 +43,8 @@ func Load() *Config {
 		CrawlMaxDepth:     parseInt(getEnv("CRAWL_MAX_DEPTH", "5")),
 		CrawlRateLimit:    parseDuration(getEnv("CRAWL_RATE_LIMIT", "500ms")),
 		ScanIntervalHours: parseInt(getEnv("SCAN_INTERVAL_HOURS", "24")),
+
+		ParserURL: getEnv("PARSER_URL", ""),
 	}
 }
 

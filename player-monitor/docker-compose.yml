@@ -17,6 +17,25 @@ services:
       retries: 5
       start_period: 10s
 
+  # Parser (headless browser)
+  parser:
+    build:
+      context: ./backend/parser
+      dockerfile: Dockerfile
+    container_name: player-monitor-parser
+    restart: unless-stopped
+    environment:
+      PORT: "8082"
+      MAX_TABS: "10"
+    tmpfs:
+      - /data/browser-profile
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   # Backend API
   backend:
     build:
@@ -36,10 +55,13 @@ services:
       CRAWL_MAX_PAGES: "3000000"
       CRAWL_MAX_DEPTH: "5"
       CRAWL_RATE_LIMIT: "500ms"
+      # PARSER_URL: "http://parser:8082"  # отключено - HTTP достаточно для amd.online
     ports:
       - "8090:8080"
     depends_on:
       mongodb:
+        condition: service_healthy
+      parser:
         condition: service_healthy
 
   # Frontend

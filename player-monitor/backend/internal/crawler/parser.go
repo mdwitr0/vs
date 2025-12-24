@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,16 +10,34 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/player-monitor/backend/pkg/logger"
 )
 
 const userAgent = "Mozilla/5.0 (compatible; PlayerMonitor/1.0)"
 
 type Parser struct {
-	client *http.Client
+	client    *http.Client
+	parserURL string
 }
 
-func NewParser(client *http.Client) *Parser {
-	return &Parser{client: client}
+type parserAPIResponse struct {
+	URL         string `json:"url"`
+	FinalURL    string `json:"final_url"`
+	HTML        string `json:"html"`
+	HTMLLength  int    `json:"html_length"`
+	Blocked     bool   `json:"blocked"`
+	IsCaptcha   bool   `json:"is_captcha"`
+	BlockReason string `json:"block_reason"`
+	FetchTimeMs int64  `json:"fetch_time_ms"`
+	Error       string `json:"error"`
+}
+
+func NewParser(client *http.Client, parserURL string) *Parser {
+	return &Parser{
+		client:    client,
+		parserURL: parserURL,
+	}
 }
 
 func (p *Parser) ParseSitemap(ctx context.Context, domain string) ([]string, error) {
@@ -30,7 +49,7 @@ func (p *Parser) ParseSitemap(ctx context.Context, domain string) ([]string, err
 
 	var allURLs []string
 	for _, sitemapURL := range sitemapURLs {
-		urls, err := p.fetchSitemap(ctx, sitemapURL)
+		urls, err := p.fetchSitemap(ctx, sitemapURL, domain)
 		if err == nil && len(urls) > 0 {
 			allURLs = append(allURLs, urls...)
 			break
@@ -44,30 +63,39 @@ func (p *Parser) ParseSitemap(ctx context.Context, domain string) ([]string, err
 	return allURLs, nil
 }
 
-func (p *Parser) fetchSitemap(ctx context.Context, url string) ([]string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
+func (p *Parser) fetchSitemap(ctx context.Context, sitemapURL string, targetDomain string) ([]string, error) {
+	var content string
+
+	if p.parserURL != "" {
+		html, err := p.fetchViaParserAPI(ctx, sitemapURL)
+		if err != nil {
+			return nil, err
+		}
+		content = html
+	} else {
+		req, err := http.NewRequestWithContext(ctx, "GET", sitemapURL, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("User-Agent", userAgent)
+
+		resp, err := p.client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("sitemap returned status %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		content = string(body)
 	}
-
-	req.Header.Set("User-Agent", userAgent)
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("sitemap returned status %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	content := string(body)
 
 	locRegex := regexp.MustCompile(`<loc>([^<]+)</loc>`)
 	matches := locRegex.FindAllStringSubmatch(content, -1)
@@ -77,9 +105,11 @@ func (p *Parser) fetchSitemap(ctx context.Context, url string) ([]string, error)
 
 	for _, match := range matches {
 		if len(match) > 1 {
-			url := strings.TrimSpace(match[1])
-			if strings.HasSuffix(url, ".xml") {
-				subURLs, err := p.fetchSitemap(ctx, url)
+			u := strings.TrimSpace(match[1])
+			// Replace host with target domain
+			u = p.replaceHost(u, targetDomain)
+			if strings.HasSuffix(u, ".xml") {
+				subURLs, err := p.fetchSitemap(ctx, u, targetDomain)
 				if err == nil {
 					for _, subURL := range subURLs {
 						if !seenURLs[subURL] {
@@ -89,9 +119,9 @@ func (p *Parser) fetchSitemap(ctx context.Context, url string) ([]string, error)
 					}
 				}
 			} else {
-				if !seenURLs[url] {
-					seenURLs[url] = true
-					urls = append(urls, url)
+				if !seenURLs[u] {
+					seenURLs[u] = true
+					urls = append(urls, u)
 				}
 			}
 		}
@@ -100,7 +130,71 @@ func (p *Parser) fetchSitemap(ctx context.Context, url string) ([]string, error)
 	return urls, nil
 }
 
+func (p *Parser) replaceHost(rawURL string, targetDomain string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	parsed.Host = targetDomain
+	return parsed.String()
+}
+
 func (p *Parser) FetchPage(ctx context.Context, pageURL string) (string, error) {
+	if p.parserURL != "" {
+		return p.fetchViaParserAPI(ctx, pageURL)
+	}
+	return p.fetchViaHTTP(ctx, pageURL)
+}
+
+func (p *Parser) fetchViaParserAPI(ctx context.Context, pageURL string) (string, error) {
+	log := logger.Log
+
+	apiURL := fmt.Sprintf("%s/api/fetch?url=%s", p.parserURL, url.QueryEscape(pageURL))
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("parser api request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+
+	var apiResp parserAPIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return "", fmt.Errorf("parse response: %w", err)
+	}
+
+	if apiResp.Error != "" {
+		return "", fmt.Errorf("parser error: %s", apiResp.Error)
+	}
+
+	if apiResp.Blocked {
+		log.Debug().Str("url", pageURL).Str("reason", apiResp.BlockReason).Msg("page blocked")
+		return "", fmt.Errorf("page blocked: %s", apiResp.BlockReason)
+	}
+
+	log.Debug().
+		Str("url", pageURL).
+		Int("html_len", apiResp.HTMLLength).
+		Int64("time_ms", apiResp.FetchTimeMs).
+		Msg("page fetched via parser api")
+
+	return apiResp.HTML, nil
+}
+
+func (p *Parser) fetchViaHTTP(ctx context.Context, pageURL string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
 	if err != nil {
 		return "", err

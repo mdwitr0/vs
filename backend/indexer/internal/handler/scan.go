@@ -29,6 +29,7 @@ func NewScanHandler(siteRepo *repo.SiteRepo, taskRepo *repo.ScanTaskRepo, sitema
 
 type ScanRequest struct {
 	SiteIDs []string `json:"site_ids"`
+	Force   bool     `json:"force"`
 }
 
 type ScanResponse struct {
@@ -143,22 +144,36 @@ func (h *ScanHandler) StartScan(c *fiber.Ctx) error {
 	for _, info := range tasksToPublish {
 		siteID := info.Site.ID.Hex()
 
-		errorsReset, err := h.sitemapURLRepo.ResetErrorsToPending(c.Context(), siteID)
-		if err != nil {
-			log.Warn().Err(err).Str("site", info.Site.Domain).Msg("failed to reset error URLs")
-		}
+		if req.Force {
+			// Force rescan: reset all indexed/error pages to pending
+			forceReset, err := h.sitemapURLRepo.ResetAllToPending(c.Context(), siteID)
+			if err != nil {
+				log.Warn().Err(err).Str("site", info.Site.Domain).Msg("failed to force reset URLs")
+			} else if forceReset > 0 {
+				log.Info().
+					Str("site", info.Site.Domain).
+					Int64("urls_reset", forceReset).
+					Msg("force rescan: all URLs reset to pending")
+			}
+		} else {
+			// Normal scan: only reset errors and retry delays
+			errorsReset, err := h.sitemapURLRepo.ResetErrorsToPending(c.Context(), siteID)
+			if err != nil {
+				log.Warn().Err(err).Str("site", info.Site.Domain).Msg("failed to reset error URLs")
+			}
 
-		pendingReset, err := h.sitemapURLRepo.ResetPendingRetryDelay(c.Context(), siteID)
-		if err != nil {
-			log.Warn().Err(err).Str("site", info.Site.Domain).Msg("failed to reset pending retry delay")
-		}
+			pendingReset, err := h.sitemapURLRepo.ResetPendingRetryDelay(c.Context(), siteID)
+			if err != nil {
+				log.Warn().Err(err).Str("site", info.Site.Domain).Msg("failed to reset pending retry delay")
+			}
 
-		if errorsReset > 0 || pendingReset > 0 {
-			log.Info().
-				Str("site", info.Site.Domain).
-				Int64("errors_reset", errorsReset).
-				Int64("pending_reset", pendingReset).
-				Msg("URL states reset for manual scan")
+			if errorsReset > 0 || pendingReset > 0 {
+				log.Info().
+					Str("site", info.Site.Domain).
+					Int64("errors_reset", errorsReset).
+					Int64("pending_reset", pendingReset).
+					Msg("URL states reset for manual scan")
+			}
 		}
 
 		if err := h.publisher.PublishSitemapCrawlTask(c.Context(), info); err != nil {

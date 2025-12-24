@@ -8,35 +8,21 @@ import (
 
 	"github.com/video-analitics/backend/pkg/captcha"
 	"github.com/video-analitics/backend/pkg/logger"
-	"github.com/video-analitics/backend/pkg/meili"
-	"github.com/video-analitics/backend/pkg/models"
 	"github.com/video-analitics/backend/pkg/nats"
 	"github.com/video-analitics/backend/pkg/queue"
 	"github.com/video-analitics/parser/internal/browser"
 	"github.com/video-analitics/parser/internal/crawler"
-	"github.com/video-analitics/parser/internal/extractor"
-	"github.com/video-analitics/parser/internal/repo"
 )
 
-const blockedThreshold = 3
-
 type Worker struct {
-	natsClient     *nats.Client
-	publisher      *nats.Publisher
-	repo           *repo.PageRepo
-	meili          *meili.Client
-	extractor      *extractor.Extractor
-	crawlRateLimit time.Duration
+	natsClient *nats.Client
+	publisher  *nats.Publisher
 }
 
-func New(natsClient *nats.Client, r *repo.PageRepo, m *meili.Client, crawlRateLimit time.Duration) *Worker {
+func New(natsClient *nats.Client) *Worker {
 	return &Worker{
-		natsClient:     natsClient,
-		publisher:      nats.NewPublisher(natsClient),
-		repo:           r,
-		meili:          m,
-		extractor:      extractor.New(),
-		crawlRateLimit: crawlRateLimit,
+		natsClient: natsClient,
+		publisher:  nats.NewPublisher(natsClient),
 	}
 }
 
@@ -138,106 +124,39 @@ func (w *Worker) processTask(ctx context.Context, task *queue.CrawlTask) {
 
 	// Fallback to homepage if no sitemap URLs
 	if len(urls) == 0 {
-		urls = w.crawlFromHomepage(ctx, task.Domain)
+		homepageURLs := w.crawlFromHomepage(ctx, task.Domain)
+		for _, u := range homepageURLs {
+			if !urlSet[u] {
+				urlSet[u] = true
+				allParsedURLs = append(allParsedURLs, queue.ParsedURLData{
+					URL:    u,
+					Source: "https://" + task.Domain,
+					Depth:  1,
+				})
+			}
+		}
+		urls = homepageURLs
 	}
 
 	totalFound := len(urls)
 
-	// Filter existing URLs
-	if w.repo != nil && len(urls) > 0 {
-		existing, err := w.repo.ExistingURLs(ctx, task.SiteID, urls)
-		if err != nil {
-			log.Warn().Err(err).Msg("failed to check existing URLs")
-		} else {
-			var newURLs []string
-			for _, u := range urls {
-				if !existing[u] {
-					newURLs = append(newURLs, u)
-				}
-			}
-			log.Info().
-				Str("domain", task.Domain).
-				Int("total", totalFound).
-				Int("existing", len(existing)).
-				Int("new", len(newURLs)).
-				Msg("filtered existing URLs")
-			urls = newURLs
-		}
-	}
-
-	onProgress := func(pagesFound, pagesSaved int) {
-		progress := queue.CrawlProgress{
-			TaskID:     task.ID,
-			PagesFound: pagesFound,
-			PagesSaved: pagesSaved,
-		}
-		if err := w.publisher.PublishCrawlProgress(ctx, &progress); err != nil {
-			log.Debug().Err(err).Msg("failed to send progress")
-		}
-	}
-
-	// Process URLs
-	pages, blockedCount := w.processURLs(ctx, urls, task.SiteID, onProgress)
-
-	if blockedCount >= blockedThreshold {
-		log.Warn().Str("domain", task.Domain).Int("blocked", blockedCount).Msg("site appears to be blocking requests")
-		result.IsBlocked = true
-		result.BlockedCount = blockedCount
-	}
-
-	// Save pages
-	saved := 0
-	var meiliDocs []meili.PageDocument
-	for _, page := range pages {
-		if err := w.repo.Upsert(ctx, &page); err != nil {
-			log.Warn().Err(err).Str("url", page.URL).Msg("page save failed")
-			continue
-		}
-		saved++
-
-		if w.meili != nil {
-			meiliDocs = append(meiliDocs, meili.PageDocument{
-				ID:            page.ID.Hex(),
-				SiteID:        page.SiteID,
-				Domain:        task.Domain,
-				URL:           page.URL,
-				Title:         page.Title,
-				Description:   page.Description,
-				MainText:      page.MainText,
-				Year:          page.Year,
-				KinopoiskID:   page.ExternalIDs.KinopoiskID,
-				IMDBID:        page.ExternalIDs.IMDBID,
-				MALID:         page.ExternalIDs.MALID,
-				ShikimoriID:   page.ExternalIDs.ShikimoriID,
-				MyDramaListID: page.ExternalIDs.MyDramaListID,
-				LinksText:     page.LinksText,
-				PlayerURLs:    []string{page.PlayerURL},
-				IndexedAt:     page.IndexedAt.Format(time.RFC3339),
-			})
-		}
-	}
-
-	if w.meili != nil && len(meiliDocs) > 0 {
-		if err := w.meili.IndexPages(meiliDocs); err != nil {
-			log.Error().Err(err).Int("count", len(meiliDocs)).Str("domain", task.Domain).Msg("meili indexing failed")
-		} else {
-			log.Info().Int("count", len(meiliDocs)).Str("domain", task.Domain).Msg("pages indexed to meilisearch")
-		}
-	}
+	log.Info().
+		Str("domain", task.Domain).
+		Int("urls_found", totalFound).
+		Msg("sitemap crawl completed, URLs sent to indexer")
 
 	result.PagesFound = totalFound
-	result.PagesSaved = saved
-	result.BlockedCount = blockedCount
+	result.PagesSaved = 0
 	result.NewCookies = w.convertCaptchaCookies(newCookies)
 	result.ParsedURLs = allParsedURLs
 	result.SitemapStats = sitemapStats
-	result.Success = (saved > 0 || len(pages) == 0) && !result.IsBlocked
+	result.Success = totalFound > 0 || len(allParsedURLs) == 0
 	result.FinishedAt = time.Now()
 
 	log.Info().
 		Str("site", task.SiteID).
 		Str("domain", task.Domain).
-		Int("pages", saved).
+		Int("urls", totalFound).
 		Msg("crawl completed")
 
 	w.sendResult(ctx, &result)
@@ -259,62 +178,6 @@ func (w *Worker) crawlFromHomepage(ctx context.Context, domain string) []string 
 	}
 
 	return crawler.ExtractLinksFromHTML(result.HTML, baseURL)
-}
-
-func (w *Worker) processURLs(ctx context.Context, urls []string, siteID string, onProgress func(int, int)) ([]models.Page, int) {
-	log := logger.Log
-	var pages []models.Page
-	blockedCount := 0
-	urlsFound := len(urls)
-
-	if onProgress != nil {
-		onProgress(urlsFound, 0)
-	}
-
-	for _, pageURL := range urls {
-		select {
-		case <-ctx.Done():
-			return pages, blockedCount
-		default:
-		}
-
-		result, err := browser.Get().FetchPage(ctx, pageURL)
-		if err != nil {
-			log.Debug().Err(err).Str("url", pageURL).Msg("page fetch failed")
-			time.Sleep(w.crawlRateLimit)
-			continue
-		}
-
-		if result.Blocked {
-			blockedCount++
-			if blockedCount >= blockedThreshold {
-				log.Warn().Int("blocked", blockedCount).Msg("blocking threshold reached")
-				return pages, blockedCount
-			}
-			time.Sleep(w.crawlRateLimit)
-			continue
-		}
-
-		page, err := w.extractor.Extract(result.HTML, pageURL, siteID, 200)
-		if err != nil {
-			log.Debug().Err(err).Str("url", pageURL).Msg("extraction failed")
-			time.Sleep(w.crawlRateLimit)
-			continue
-		}
-
-		if page != nil && page.Title != "" {
-			pages = append(pages, *page)
-			log.Debug().Str("url", pageURL).Str("title", page.Title).Msg("page extracted")
-
-			if onProgress != nil {
-				onProgress(urlsFound, len(pages))
-			}
-		}
-
-		time.Sleep(w.crawlRateLimit)
-	}
-
-	return pages, blockedCount
 }
 
 func (w *Worker) convertTaskCookies(taskCookies []queue.CookieData) []captcha.Cookie {

@@ -161,9 +161,10 @@ export function SiteDetailPage() {
   ].filter(Boolean).length
 
   const scanMutation = useMutation({
-    mutationFn: () => sitesApi.scan({ site_ids: [id!] }),
+    mutationFn: (force: boolean = false) => sitesApi.scan({ site_ids: [id!], force }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['scan-tasks', id] })
+      queryClient.invalidateQueries({ queryKey: ['sitemap-urls-stats', id] })
     },
   })
 
@@ -316,7 +317,15 @@ export function SiteDetailPage() {
             </Button>
           )}
           <Button
-            onClick={() => scanMutation.mutate()}
+            variant="outline"
+            onClick={() => scanMutation.mutate(true)}
+            disabled={site.status === 'pending' || site.status === 'frozen' || isScanning || scanMutation.isPending}
+            title="Сбросить все страницы и пересканировать заново"
+          >
+            {scanMutation.isPending ? 'Запуск...' : 'Пересканировать всё'}
+          </Button>
+          <Button
+            onClick={() => scanMutation.mutate(false)}
             disabled={site.status === 'pending' || site.status === 'frozen' || isScanning || scanMutation.isPending}
             title={site.status === 'pending' ? 'Ожидает завершения анализа' : site.status === 'frozen' ? 'Сайт заморожен — запустите анализ' : undefined}
           >

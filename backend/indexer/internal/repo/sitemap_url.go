@@ -450,6 +450,31 @@ func (r *SitemapURLRepo) ResetPendingRetryDelay(ctx context.Context, siteID stri
 	return result.ModifiedCount, nil
 }
 
+func (r *SitemapURLRepo) ResetAllToPending(ctx context.Context, siteID string) (int64, error) {
+	result, err := r.coll.UpdateMany(ctx,
+		bson.M{
+			"site_id": siteID,
+			"status":  bson.M{"$in": []status.URL{status.URLIndexed, status.URLError}},
+		},
+		bson.M{
+			"$set": bson.M{
+				"status":      status.URLPending,
+				"error":       "",
+				"retry_count": 0,
+			},
+			"$unset": bson.M{
+				"indexed_at":      "",
+				"last_attempt_at": "",
+				"locked_until":    "",
+			},
+		},
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.ModifiedCount, nil
+}
+
 func (r *SitemapURLRepo) GetAllURLStrings(ctx context.Context, siteID string) ([]string, error) {
 	filter := bson.M{"site_id": siteID}
 

@@ -422,71 +422,67 @@ export function SitesPage() {
   ]
 
   const filtersContent = (
-    <>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
-        <Input
-          placeholder="Поиск по домену..."
-          value={domainSearch}
-          onChange={(e) => setDomainSearch(e.target.value)}
-        />
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger>
-            <SelectValue placeholder="Статус" />
-          </SelectTrigger>
-          <SelectContent>
-            {STATUS_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={scannedSinceFilter} onValueChange={setScannedSinceFilter}>
-          <SelectTrigger>
-            <SelectValue placeholder="Дата обхода" />
-          </SelectTrigger>
-          <SelectContent>
-            {SCANNED_SINCE_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={hasViolationsFilter} onValueChange={setHasViolationsFilter}>
-          <SelectTrigger>
-            <SelectValue placeholder="Нарушения" />
-          </SelectTrigger>
-          <SelectContent>
-            {VIOLATIONS_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={stageFilter} onValueChange={setStageFilter}>
-          <SelectTrigger>
-            <SelectValue placeholder="Этап" />
-          </SelectTrigger>
-          <SelectContent>
-            {STAGE_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
+    <div className="flex flex-wrap items-center gap-2">
+      <Input
+        placeholder="Поиск по домену..."
+        value={domainSearch}
+        onChange={(e) => setDomainSearch(e.target.value)}
+        className="w-[200px]"
+      />
+      <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <SelectTrigger className="w-[140px]">
+          <SelectValue placeholder="Статус" />
+        </SelectTrigger>
+        <SelectContent>
+          {STATUS_OPTIONS.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select value={scannedSinceFilter} onValueChange={setScannedSinceFilter}>
+        <SelectTrigger className="w-[140px]">
+          <SelectValue placeholder="Дата обхода" />
+        </SelectTrigger>
+        <SelectContent>
+          {SCANNED_SINCE_OPTIONS.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select value={hasViolationsFilter} onValueChange={setHasViolationsFilter}>
+        <SelectTrigger className="w-[150px]">
+          <SelectValue placeholder="Нарушения" />
+        </SelectTrigger>
+        <SelectContent>
+          {VIOLATIONS_OPTIONS.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select value={stageFilter} onValueChange={setStageFilter}>
+        <SelectTrigger className="w-[160px]">
+          <SelectValue placeholder="Этап" />
+        </SelectTrigger>
+        <SelectContent>
+          {STAGE_OPTIONS.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       {activeFiltersCount > 0 && (
-        <div className="flex items-center">
-          <Button variant="ghost" size="sm" onClick={clearAllFilters}>
-            Сбросить всё
-          </Button>
-        </div>
+        <Button variant="ghost" size="sm" onClick={clearAllFilters}>
+          Сбросить
+        </Button>
       )}
-    </>
+    </div>
   )
 
   return (

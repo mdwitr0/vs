@@ -18,21 +18,22 @@ var titleRegex = regexp.MustCompile(`(?i)<title[^>]*>([^<]*)</title>`)
 
 // DetectBlocking checks if HTML response indicates a blocked page or captcha
 // Priority order:
-// 1. HTTP status code (403, 429, 503)
-// 2. Captcha detection (Pirate-style)
+// 1. Captcha detection (Pirate-style) - MUST be first, captcha pages often have 403 status
+// 2. HTTP status code (403, 429, 503)
 // 3. Exact blocking phrases
 // 4. IP address in title
 // 5. Error title in short HTML
 // 6. noindex + empty title + short HTML
 func DetectBlocking(html string, statusCode int) BlockResult {
-	// Level 1: HTTP status code
-	if statusCode == 403 || statusCode == 429 || statusCode == 503 {
-		return BlockResult{Blocked: true, Reason: fmt.Sprintf("HTTP %d", statusCode)}
-	}
-
-	// Level 2: Captcha detection (must be handled separately)
+	// Level 1: Captcha detection - check BEFORE HTTP status!
+	// Captcha pages often return 403, but we need to solve them, not just report blocked
 	if IsPirateCaptcha(html) {
 		return BlockResult{Blocked: true, IsCaptcha: true, Reason: "pirate captcha"}
+	}
+
+	// Level 2: HTTP status code
+	if statusCode == 403 || statusCode == 429 || statusCode == 503 {
+		return BlockResult{Blocked: true, Reason: fmt.Sprintf("HTTP %d", statusCode)}
 	}
 
 	// Level 3: Exact blocking phrases
@@ -102,7 +103,11 @@ func IsPirateCaptcha(html string) bool {
 	hasImageCaptcha := containsSubstring(html, "похожую картинку") ||
 		containsSubstring(html, "нажмите на похожую картинку")
 
-	return hasButton || hasConfirmText || hasColorCaptcha || hasImageCaptcha
+	// Antibot JS challenge (peel.js) - captcha shows after JS execution
+	hasAntibotChallenge := (containsSubstring(html, "antibot") || containsSubstring(html, "peel.js")) &&
+		containsSubstring(html, "Идёт загрузка")
+
+	return hasButton || hasConfirmText || hasColorCaptcha || hasImageCaptcha || hasAntibotChallenge
 }
 
 // IsSitemapCaptcha detects captcha on sitemap page

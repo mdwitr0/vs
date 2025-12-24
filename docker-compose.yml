@@ -96,7 +96,7 @@ services:
       meilisearch:
         condition: service_healthy
 
-  # Parser service
+  # Parser service (uses Lightpanda browser)
   parser:
     build:
       context: ./backend
@@ -107,33 +107,33 @@ services:
       - "8082:8082"
     environment:
       NATS_URL: nats://nats:4222
-      MONGO_URL: mongodb://mongodb:27017
-      MONGO_DB: video_analitics
-      MEILI_URL: http://meilisearch:7700
-      MEILI_KEY: masterKey
       WORKER_COUNT: "5"
+      MAX_BROWSER_TABS: "10"
       HTTP_PORT: "8082"
       INTERNAL_API_TOKEN: "va-internal-token-2024-secure"
-      REDIS_URL: redis://redis:6379
-      HTML_CACHE_TTL: "24h"
-      PAGE_LOAD_DELAY: "2s"
-      CRAWL_RATE_LIMIT: "2s"
-    volumes:
-      - browser_profiles:/data/browser-profiles
+      PAGE_LOAD_DELAY: "0s"
+      BROWSER_CDP_URL: ws://lightpanda:9222
     depends_on:
-      mongodb:
-        condition: service_healthy
       nats:
         condition: service_healthy
-      meilisearch:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    shm_size: 2gb
+      lightpanda:
+        condition: service_started
     deploy:
       resources:
         limits:
-          memory: 4G
+          memory: 512M
+
+  # Lightpanda - lightweight headless browser
+  lightpanda:
+    image: lightpanda/browser:nightly
+    container_name: video-analitics-lightpanda
+    restart: unless-stopped
+    environment:
+      LIGHTPANDA_DISABLE_TELEMETRY: "true"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   # Frontend
   frontend:
@@ -152,4 +152,3 @@ volumes:
   redis_data:
   meilisearch_data:
   nats_data:
-  browser_profiles:

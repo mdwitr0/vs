@@ -49,6 +49,7 @@ export interface CreateSiteRequest {
 
 export interface ScanSitesRequest {
   site_ids: string[]
+  force?: boolean
 }
 
 export interface ScanSitesResponse {
