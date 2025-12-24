@@ -13,27 +13,29 @@ import (
 )
 
 type Scheduler struct {
-	siteRepo      *repo.SiteRepo
-	taskRepo      *repo.ScanTaskRepo
-	contentRepo   *repo.ContentRepo
-	publisher     *indexerQueue.Publisher
-	violationsSvc *violations.Service
-	scheduler     gocron.Scheduler
+	siteRepo       *repo.SiteRepo
+	taskRepo       *repo.ScanTaskRepo
+	sitemapURLRepo *repo.SitemapURLRepo
+	contentRepo    *repo.ContentRepo
+	publisher      *indexerQueue.Publisher
+	violationsSvc  *violations.Service
+	scheduler      gocron.Scheduler
 }
 
-func New(siteRepo *repo.SiteRepo, taskRepo *repo.ScanTaskRepo, contentRepo *repo.ContentRepo, publisher *indexerQueue.Publisher, violationsSvc *violations.Service) (*Scheduler, error) {
+func New(siteRepo *repo.SiteRepo, taskRepo *repo.ScanTaskRepo, sitemapURLRepo *repo.SitemapURLRepo, contentRepo *repo.ContentRepo, publisher *indexerQueue.Publisher, violationsSvc *violations.Service) (*Scheduler, error) {
 	s, err := gocron.NewScheduler()
 	if err != nil {
 		return nil, err
 	}
 
 	return &Scheduler{
-		siteRepo:      siteRepo,
-		taskRepo:      taskRepo,
-		contentRepo:   contentRepo,
-		publisher:     publisher,
-		violationsSvc: violationsSvc,
-		scheduler:     s,
+		siteRepo:       siteRepo,
+		taskRepo:       taskRepo,
+		sitemapURLRepo: sitemapURLRepo,
+		contentRepo:    contentRepo,
+		publisher:      publisher,
+		violationsSvc:  violationsSvc,
+		scheduler:      s,
 	}, nil
 }
 
@@ -82,6 +84,16 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		gocron.DurationJob(2*time.Minute),
 		gocron.NewTask(func() {
 			s.retryFailedTasks(ctx)
+		}),
+	)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.scheduler.NewJob(
+		gocron.DurationJob(2*time.Minute),
+		gocron.NewTask(func() {
+			s.recoverStaleURLs(ctx)
 		}),
 	)
 	if err != nil {
@@ -355,5 +367,23 @@ func (s *Scheduler) retryFailedTasks(ctx context.Context) {
 			Str("stage", string(task.Stage)).
 			Int("retry", task.RetryCount+1).
 			Msg("failed task retried")
+	}
+}
+
+func (s *Scheduler) recoverStaleURLs(ctx context.Context) {
+	if s.sitemapURLRepo == nil {
+		return
+	}
+
+	log := logger.Log
+
+	recovered, err := s.sitemapURLRepo.RecoverStaleURLs(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to recover stale URLs")
+		return
+	}
+
+	if recovered > 0 {
+		log.Info().Int64("count", recovered).Msg("recovered stale URLs from processing to pending")
 	}
 }

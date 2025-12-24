@@ -109,7 +109,7 @@ services:
     networks:
       - internal
 
-  # Parser service
+  # Parser service (uses Chrome Headless Shell)
   parser:
     build:
       context: ./backend
@@ -120,23 +120,36 @@ services:
       NATS_URL: nats://nats:4222
       INDEXER_API_URL: http://146.19.213.178:8080
       WORKER_COUNT: ${WORKER_COUNT}
-      MAX_BROWSER_TABS: ${MAX_BROWSER_TABS:-3}
+      MAX_BROWSER_TABS: ${MAX_BROWSER_TABS:-10}
       HTTP_PORT: "8082"
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
       PAGE_LOAD_DELAY: ${PAGE_LOAD_DELAY:-0s}
-    volumes:
-      - browser_profiles:/data/browser-profiles
+      BROWSER_CDP_URL: ws://chrome:9222
     depends_on:
       nats:
         condition: service_healthy
-    shm_size: 1gb
+      chrome:
+        condition: service_started
     deploy:
       resources:
         limits:
-          memory: 2.5G
-          cpus: '2.0'
-        reservations:
           memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+    networks:
+      - internal
+
+  # Chrome Headless Shell
+  chrome:
+    image: chromedp/headless-shell:latest
+    container_name: va-prod-chrome
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '2.0'
     networks:
       - internal
 
@@ -176,4 +189,3 @@ volumes:
   redis_data:
   meilisearch_data:
   nats_data:
-  browser_profiles:

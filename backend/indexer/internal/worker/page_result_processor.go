@@ -13,26 +13,29 @@ import (
 )
 
 type PageResultProcessor struct {
-	natsClient    *nats.Client
-	siteRepo      *repo.SiteRepo
-	progressSvc   *service.TaskProgressService
-	contentRepo   *repo.ContentRepo
-	violationsSvc *violations.Service
+	natsClient     *nats.Client
+	siteRepo       *repo.SiteRepo
+	sitemapURLRepo *repo.SitemapURLRepo
+	progressSvc    *service.TaskProgressService
+	contentRepo    *repo.ContentRepo
+	violationsSvc  *violations.Service
 }
 
 func NewPageResultProcessor(
 	natsClient *nats.Client,
 	siteRepo *repo.SiteRepo,
+	sitemapURLRepo *repo.SitemapURLRepo,
 	progressSvc *service.TaskProgressService,
 	contentRepo *repo.ContentRepo,
 	violationsSvc *violations.Service,
 ) *PageResultProcessor {
 	return &PageResultProcessor{
-		natsClient:    natsClient,
-		siteRepo:      siteRepo,
-		progressSvc:   progressSvc,
-		contentRepo:   contentRepo,
-		violationsSvc: violationsSvc,
+		natsClient:     natsClient,
+		siteRepo:       siteRepo,
+		sitemapURLRepo: sitemapURLRepo,
+		progressSvc:    progressSvc,
+		contentRepo:    contentRepo,
+		violationsSvc:  violationsSvc,
 	}
 }
 
@@ -131,7 +134,16 @@ func (p *PageResultProcessor) processResult(ctx context.Context, result *queue.P
 	// If any pages were successfully parsed, site is active
 	// Only mark failure if NO pages succeeded at all
 	if result.IPBlocked {
-		log.Warn().Str("site", result.SiteID).Str("reason", result.BlockReason).Msg("IP blocked during page crawl (site not frozen)")
+		log.Warn().Str("site", result.SiteID).Str("reason", result.BlockReason).Msg("IP blocked, freezing site")
+		if err := p.siteRepo.MarkFrozen(ctx, result.SiteID, result.BlockReason); err != nil {
+			log.Error().Err(err).Str("site", result.SiteID).Msg("failed to freeze site")
+		}
+		skipped, err := p.sitemapURLRepo.SkipPendingBySiteID(ctx, result.SiteID, result.BlockReason)
+		if err != nil {
+			log.Error().Err(err).Str("site", result.SiteID).Msg("failed to skip pending URLs")
+		} else if skipped > 0 {
+			log.Info().Str("site", result.SiteID).Int64("skipped", skipped).Msg("pending URLs skipped due to IP block")
+		}
 	} else if result.PagesSuccess > 0 {
 		if err := p.siteRepo.MarkSuccess(ctx, result.SiteID, 0); err != nil {
 			log.Warn().Err(err).Str("site", result.SiteID).Msg("failed to mark site success")

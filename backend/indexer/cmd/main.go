@@ -178,7 +178,7 @@ func main() {
 	defer cancel()
 
 	// Start scheduler (с violationsSvc для периодического обновления нарушений)
-	sched, err := scheduler.New(siteRepo, taskRepo, contentRepo, publisher, violationsSvc)
+	sched, err := scheduler.New(siteRepo, taskRepo, sitemapURLRepo, contentRepo, publisher, violationsSvc)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create scheduler")
 	}
@@ -244,7 +244,7 @@ func main() {
 	}()
 
 	// Start page result processor (finalizes page crawl task)
-	pageResultProcessor := worker.NewPageResultProcessor(natsClient, siteRepo, progressSvc, contentRepo, violationsSvc)
+	pageResultProcessor := worker.NewPageResultProcessor(natsClient, siteRepo, sitemapURLRepo, progressSvc, contentRepo, violationsSvc)
 	go func() {
 		if err := pageResultProcessor.Run(ctx); err != nil && err != context.Canceled {
 			log.Error().Err(err).Msg("page result processor error")

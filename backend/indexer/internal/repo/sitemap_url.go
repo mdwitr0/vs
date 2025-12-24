@@ -45,11 +45,12 @@ type SitemapURLInput struct {
 }
 
 type SitemapURLStats struct {
-	Pending int64 `json:"pending"`
-	Indexed int64 `json:"indexed"`
-	Error   int64 `json:"error"`
-	Skipped int64 `json:"skipped"`
-	Total   int64 `json:"total"`
+	Pending    int64 `json:"pending"`
+	Processing int64 `json:"processing"`
+	Indexed    int64 `json:"indexed"`
+	Error      int64 `json:"error"`
+	Skipped    int64 `json:"skipped"`
+	Total      int64 `json:"total"`
 }
 
 type SitemapURLRepo struct {
@@ -233,7 +234,10 @@ func (r *SitemapURLRepo) FindPendingAndLock(ctx context.Context, siteID string, 
 	}
 
 	_, err = r.coll.UpdateMany(ctx, bson.M{"_id": bson.M{"$in": urlIDs}}, bson.M{
-		"$set": bson.M{"locked_until": lockUntil},
+		"$set": bson.M{
+			"locked_until": lockUntil,
+			"status":       status.URLProcessing,
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -262,15 +266,17 @@ func (r *SitemapURLRepo) MarkError(ctx context.Context, siteID, url, errMsg stri
 	now := time.Now()
 	filter := bson.M{"site_id": siteID, "url": url}
 
+	// Return to pending for retry, increment retry_count
 	_, err := r.coll.UpdateOne(ctx, filter, bson.M{
 		"$inc":   bson.M{"retry_count": 1},
-		"$set":   bson.M{"error": errMsg, "last_attempt_at": now},
+		"$set":   bson.M{"error": errMsg, "last_attempt_at": now, "status": status.URLPending},
 		"$unset": bson.M{"locked_until": ""},
 	})
 	if err != nil {
 		return err
 	}
 
+	// If max retries exceeded, mark as error (terminal state)
 	_, err = r.coll.UpdateOne(ctx, bson.M{
 		"site_id":     siteID,
 		"url":         url,
@@ -310,6 +316,8 @@ func (r *SitemapURLRepo) GetStats(ctx context.Context, siteID string) (*SitemapU
 		switch status.URL(result.ID) {
 		case status.URLPending:
 			stats.Pending = result.Count
+		case status.URLProcessing:
+			stats.Processing = result.Count
 		case status.URLIndexed:
 			stats.Indexed = result.Count
 		case status.URLError:
@@ -365,6 +373,25 @@ func (r *SitemapURLRepo) ExistsURL(ctx context.Context, siteID, url string) (boo
 func (r *SitemapURLRepo) DeleteBySiteID(ctx context.Context, siteID string) error {
 	_, err := r.coll.DeleteMany(ctx, bson.M{"site_id": siteID})
 	return err
+}
+
+func (r *SitemapURLRepo) SkipPendingBySiteID(ctx context.Context, siteID string, reason string) (int64, error) {
+	result, err := r.coll.UpdateMany(ctx,
+		bson.M{
+			"site_id": siteID,
+			"status":  status.URLPending,
+		},
+		bson.M{
+			"$set": bson.M{
+				"status": status.URLSkipped,
+				"error":  reason,
+			},
+		},
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.ModifiedCount, nil
 }
 
 func (r *SitemapURLRepo) GetPendingCounts(ctx context.Context, siteIDs []string) (map[string]int64, error) {
@@ -519,4 +546,29 @@ func isXMLURL(url string) bool {
 	}
 
 	return false
+}
+
+// RecoverStaleURLs returns URLs stuck in processing state (lock expired) back to pending
+func (r *SitemapURLRepo) RecoverStaleURLs(ctx context.Context) (int64, error) {
+	now := time.Now()
+
+	// Find URLs that are in processing state but lock has expired
+	result, err := r.coll.UpdateMany(ctx,
+		bson.M{
+			"status": status.URLProcessing,
+			"$or": []bson.M{
+				{"locked_until": bson.M{"$lt": now}},
+				{"locked_until": bson.M{"$exists": false}},
+				{"locked_until": nil},
+			},
+		},
+		bson.M{
+			"$set":   bson.M{"status": status.URLPending},
+			"$unset": bson.M{"locked_until": ""},
+		},
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.ModifiedCount, nil
 }

@@ -29,14 +29,15 @@ const (
 
 // URL represents the status of a sitemap URL
 // @Description URL indexing status
-// @enum pending,indexed,error,skipped
+// @enum pending,processing,indexed,error,skipped
 type URL string
 
 const (
-	URLPending URL = "pending" // waiting to be indexed
-	URLIndexed URL = "indexed" // successfully indexed
-	URLError   URL = "error"   // failed after max retries
-	URLSkipped URL = "skipped" // skipped (e.g., XML sitemap reference)
+	URLPending    URL = "pending"    // waiting to be indexed
+	URLProcessing URL = "processing" // currently being parsed
+	URLIndexed    URL = "indexed"    // successfully indexed
+	URLError      URL = "error"      // failed after max retries
+	URLSkipped    URL = "skipped"    // skipped (e.g., XML sitemap reference)
 )
 
 // ScannerType represents the type of scanner used for a site
@@ -94,7 +95,7 @@ func AllTaskStatuses() []Task {
 
 // AllURLStatuses returns all valid URL statuses
 func AllURLStatuses() []URL {
-	return []URL{URLPending, URLIndexed, URLError, URLSkipped}
+	return []URL{URLPending, URLProcessing, URLIndexed, URLError, URLSkipped}
 }
 
 // IsTerminal returns true if the task status is terminal (no further transitions)

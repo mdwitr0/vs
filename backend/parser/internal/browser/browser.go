@@ -30,12 +30,11 @@ type GlobalBrowser struct {
 	solver        *captcha.PirateSolver
 	semaphore     chan struct{} // limits concurrent tabs
 	pageLoadDelay time.Duration
-	isRemote      bool // true if using remote browser (Lightpanda)
 }
 
 // Init initializes the global browser singleton
 // Must be called once at application startup
-// Set BROWSER_CDP_URL env to use remote browser (e.g., Lightpanda: ws://lightpanda:9222)
+// Set BROWSER_CDP_URL env to use remote browser (e.g., ws://chrome:9222)
 func Init(ctx context.Context, solver *captcha.PirateSolver, pageLoadDelay time.Duration, maxTabs int) error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -52,14 +51,10 @@ func Init(ctx context.Context, solver *captcha.PirateSolver, pageLoadDelay time.
 
 	var allocCtx context.Context
 	var allocCancel context.CancelFunc
-	var isRemote bool
 
 	if cdpURL != "" {
-		// Remote browser (Lightpanda or remote Chrome)
-		// NoModifyURL prevents chromedp from fetching /json/version and using the returned URL
-		// This is needed for Lightpanda which returns ws://0.0.0.0:9222/ in /json/version
-		allocCtx, allocCancel = chromedp.NewRemoteAllocator(ctx, cdpURL, chromedp.NoModifyURL)
-		isRemote = true
+		// Remote Chrome browser via CDP
+		allocCtx, allocCancel = chromedp.NewRemoteAllocator(ctx, cdpURL)
 		logger.Log.Info().Str("cdp_url", cdpURL).Msg("using remote browser")
 	} else {
 		// Local Chrome
@@ -99,10 +94,9 @@ func Init(ctx context.Context, solver *captcha.PirateSolver, pageLoadDelay time.
 		solver:        solver,
 		semaphore:     make(chan struct{}, maxTabs),
 		pageLoadDelay: pageLoadDelay,
-		isRemote:      isRemote,
 	}
 
-	logger.Log.Info().Int("max_tabs", maxTabs).Dur("page_load_delay", pageLoadDelay).Bool("remote", isRemote).Msg("global browser initialized")
+	logger.Log.Info().Int("max_tabs", maxTabs).Dur("page_load_delay", pageLoadDelay).Msg("global browser initialized")
 	return nil
 }
 

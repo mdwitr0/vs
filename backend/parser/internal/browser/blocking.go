@@ -39,6 +39,8 @@ func DetectBlocking(html string, statusCode int) BlockResult {
 	// Level 3: Exact blocking phrases
 	blockingPhrases := []string{
 		"Sorry, your request has been denied",
+		"Sorry, you have been blocked",
+		"Attention Required! | Cloudflare",
 		"Ваш IP заблокирован",
 		"Your IP is blocked",
 		"Your IP has been blocked",

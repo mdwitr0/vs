@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
@@ -12,6 +13,8 @@ import (
 	cdpopts "github.com/video-analitics/backend/pkg/chromedp"
 	"github.com/video-analitics/backend/pkg/logger"
 )
+
+const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 YaBrowser/25.10.0.0 Safari/537.36"
 
 const defaultTabTimeout = 60 * time.Second
 
@@ -34,85 +37,58 @@ func (b *GlobalBrowser) FetchPage(ctx context.Context, url string) (*FetchResult
 	}
 	defer b.Release()
 
-	timeoutCtx, timeoutCancel := context.WithTimeout(b.browserCtx, defaultTabTimeout)
-	defer timeoutCancel()
-
 	var html string
 	var finalURL string
 
-	// For remote browsers (Lightpanda), use simplified commands
-	if b.isRemote {
-		tasks := chromedp.Tasks{
-			// Set User-Agent to look like Chrome
-			chromedp.ActionFunc(func(ctx context.Context) error {
-				return network.SetUserAgentOverride("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36").
-					WithAcceptLanguage("ru-RU,ru;q=0.9,en;q=0.8").
-					Do(ctx)
-			}),
-			// Set extra headers
-			chromedp.ActionFunc(func(ctx context.Context) error {
-				return network.SetExtraHTTPHeaders(network.Headers{
-					"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-					"Accept-Language":           "ru-RU,ru;q=0.9,en;q=0.8",
-					"sec-ch-ua":                 `"Chromium";v="131", "Google Chrome";v="131", "Not_A Brand";v="24"`,
-					"sec-ch-ua-mobile":          "?0",
-					"sec-ch-ua-platform":        `"Windows"`,
-					"Upgrade-Insecure-Requests": "1",
-				}).Do(ctx)
-			}),
-			chromedp.Navigate(url),
-			chromedp.Sleep(b.pageLoadDelay + 2*time.Second), // Extra wait for JS
-			chromedp.Location(&finalURL),
-			chromedp.OuterHTML("html", &html),
-		}
+	// Create new tab context
+	tabCtx, tabCancel := chromedp.NewContext(b.browserCtx)
+	defer tabCancel()
 
-		if err := chromedp.Run(timeoutCtx, tasks); err != nil {
-			return nil, fmt.Errorf("fetch page: %w", err)
-		}
-	} else {
-		// For local Chrome, use full features
-		tabCtx, tabCancel := chromedp.NewContext(b.browserCtx)
-		defer tabCancel()
+	tabTimeoutCtx, tabTimeoutCancel := context.WithTimeout(tabCtx, defaultTabTimeout)
+	defer tabTimeoutCancel()
 
-		tabTimeoutCtx, tabTimeoutCancel := context.WithTimeout(tabCtx, defaultTabTimeout)
-		defer tabTimeoutCancel()
+	tasks := chromedp.Tasks{
+		// Set User-Agent via emulation API (more reliable than command-line flag)
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return emulation.SetUserAgentOverride(userAgent).
+				WithAcceptLanguage("ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7").
+				WithPlatform("macOS").
+				Do(ctx)
+		}),
+		// Block unnecessary resources (images, videos, fonts, stylesheets)
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return network.SetBlockedURLs([]string{
+				"*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.svg", "*.ico",
+				"*.mp4", "*.webm", "*.avi", "*.mov",
+				"*.woff", "*.woff2", "*.ttf", "*.eot", "*.otf",
+				"*.css",
+				"*google-analytics*", "*googletagmanager*", "*facebook*", "*yandex*metrika*",
+				"*ads*", "*analytics*", "*tracking*",
+			}).Do(ctx)
+		}),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return network.SetExtraHTTPHeaders(network.Headers{
+				"Accept-Language":           "ru-RU,ru;q=0.9,en;q=0.8",
+				"sec-ch-ua":                 `"Chromium";v="140", "Not=A?Brand";v="24", "YaBrowser";v="25.10", "Yowser";v="2.5"`,
+				"sec-ch-ua-mobile":          "?0",
+				"sec-ch-ua-platform":        `"macOS"`,
+				"Upgrade-Insecure-Requests": "1",
+				"DNT":                       "1",
+			}).Do(ctx)
+		}),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			_, err := page.AddScriptToEvaluateOnNewDocument(cdpopts.GetStealthScripts()).Do(ctx)
+			return err
+		}),
+		chromedp.Navigate(url),
+		chromedp.WaitReady("body", chromedp.ByQuery),
+		chromedp.Sleep(b.pageLoadDelay),
+		chromedp.Location(&finalURL),
+		chromedp.OuterHTML("html", &html),
+	}
 
-		tasks := chromedp.Tasks{
-			// Block unnecessary resources (images, videos, fonts, stylesheets)
-			chromedp.ActionFunc(func(ctx context.Context) error {
-				return network.SetBlockedURLs([]string{
-					"*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.svg", "*.ico",
-					"*.mp4", "*.webm", "*.avi", "*.mov",
-					"*.woff", "*.woff2", "*.ttf", "*.eot", "*.otf",
-					"*.css",
-					"*google-analytics*", "*googletagmanager*", "*facebook*", "*yandex*metrika*",
-					"*ads*", "*analytics*", "*tracking*",
-				}).Do(ctx)
-			}),
-			chromedp.ActionFunc(func(ctx context.Context) error {
-				return network.SetExtraHTTPHeaders(network.Headers{
-					"Accept-Language":           "ru-RU,ru;q=0.9,en;q=0.8",
-					"sec-ch-ua":                 `"Chromium";v="140", "Not=A?Brand";v="24", "YaBrowser";v="25.10", "Yowser";v="2.5"`,
-					"sec-ch-ua-mobile":          "?0",
-					"sec-ch-ua-platform":        `"macOS"`,
-					"Upgrade-Insecure-Requests": "1",
-					"DNT":                       "1",
-				}).Do(ctx)
-			}),
-			chromedp.ActionFunc(func(ctx context.Context) error {
-				_, err := page.AddScriptToEvaluateOnNewDocument(cdpopts.GetStealthScripts()).Do(ctx)
-				return err
-			}),
-			chromedp.Navigate(url),
-			chromedp.WaitReady("body", chromedp.ByQuery),
-			chromedp.Sleep(b.pageLoadDelay),
-			chromedp.Location(&finalURL),
-			chromedp.OuterHTML("html", &html),
-		}
-
-		if err := chromedp.Run(tabTimeoutCtx, tasks); err != nil {
-			return nil, fmt.Errorf("fetch page: %w", err)
-		}
+	if err := chromedp.Run(tabTimeoutCtx, tasks); err != nil {
+		return nil, fmt.Errorf("fetch page: %w", err)
 	}
 
 	log.Debug().Str("url", url).Str("final_url", finalURL).Int("html_len", len(html)).Msg("page fetched")
@@ -123,7 +99,7 @@ func (b *GlobalBrowser) FetchPage(ctx context.Context, url string) (*FetchResult
 		if blockResult.IsCaptcha && b.solver != nil {
 			log.Info().Str("url", url).Msg("captcha detected, solving...")
 
-			result, err := b.solveCaptchaInTab(timeoutCtx, url)
+			result, err := b.solveCaptchaInTab(tabTimeoutCtx, url)
 			if err != nil {
 				return &FetchResult{
 					FinalURL:    finalURL,
@@ -175,7 +151,7 @@ func (b *GlobalBrowser) FetchPage(ctx context.Context, url string) (*FetchResult
 	}
 
 	// Get cookies
-	cookies, _ := b.getCookies(timeoutCtx)
+	cookies, _ := b.getCookies(tabTimeoutCtx)
 
 	return &FetchResult{
 		HTML:     html,
@@ -201,6 +177,13 @@ func (b *GlobalBrowser) FetchSitemap(ctx context.Context, sitemapURL string) (*F
 
 	var body string
 	tasks := chromedp.Tasks{
+		// Set User-Agent via emulation API
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return emulation.SetUserAgentOverride(userAgent).
+				WithAcceptLanguage("ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7").
+				WithPlatform("macOS").
+				Do(ctx)
+		}),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			return network.SetExtraHTTPHeaders(network.Headers{
 				"Accept-Language":           "ru-RU,ru;q=0.9,en;q=0.8",

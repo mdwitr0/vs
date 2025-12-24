@@ -10,7 +10,8 @@ import (
 )
 
 type FetchRequest struct {
-	URL string `json:"url" query:"url"`
+	URL  string `json:"url" query:"url"`
+	Mode string `json:"mode" query:"mode"` // "browser" (default) or "http"
 }
 
 type FetchResponse struct {
@@ -57,19 +58,27 @@ func handleFetch(c *fiber.Ctx) error {
 		}
 	} else {
 		req.URL = c.Query("url")
+		req.Mode = c.Query("mode", "browser")
 	}
 
 	if req.URL == "" {
 		return c.Status(400).JSON(fiber.Map{"error": "url is required"})
 	}
 
-	log.Info().Str("url", req.URL).Msg("fetch request received")
+	log.Info().Str("url", req.URL).Str("mode", req.Mode).Msg("fetch request received")
 
 	ctx, cancel := context.WithTimeout(c.Context(), 90*time.Second)
 	defer cancel()
 
 	start := time.Now()
-	result, err := browser.Get().FetchPage(ctx, req.URL)
+	var result *browser.FetchResult
+	var err error
+
+	if req.Mode == "http" {
+		result, err = browser.FetchPageHTTP(ctx, req.URL)
+	} else {
+		result, err = browser.Get().FetchPage(ctx, req.URL)
+	}
 	elapsed := time.Since(start)
 
 	if err != nil {
